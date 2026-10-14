@@ -1,0 +1,48 @@
+book_id: "light_on_yoga"
+book_title: "Light on Yoga"
+author: "B.K.S. Iyengar"
+edition: "HarperCollins"
+pdf_path: "docs/Light-on-Yoga.pdf"
+output_path: "chunks_light_on_yoga.jsonl"
+
+# Selected chunking strategy: 'standard' for non-verse / narrative books
+chunking_strategy: "standard"
+
+# Embedding model configuration (Standardized strictly on OpenAI)
+embedding:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  dimension: 1536
+
+# Vector database storage configuration
+vector_db:
+  type: "chromadb"
+  persist_directory: "chroma_db"
+  collection_name: "yoga_scriptures"
+  distance_metric: "cosine"
+
+# Settings for standard narrative strategy
+standard_strategy:
+  chunk_size: 1500
+  max_tokens: 600
+  chunk_overlap: 150
+
+# Relative margin ratios (percentage of page height) for resolution/trim independence
+margins:
+  header_top_ratio: 0.08       # Top 8% of page height
+  footer_bottom_ratio: 0.93    # Bottom 7% of page height
+
+# Chapter structure with starting/cover pages
+chapters:
+  1:
+    number: 1
+    title: "What is Yoga?"
+    cover_page: 15
+  2:
+    number: 2
+    title: "Yogasanas, Bandhas & Kriyas"
+    cover_page: 45
+  3:
+    number: 3
+    title: "Pranayama"
+    cover_page: 320
