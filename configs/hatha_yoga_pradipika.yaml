@@ -1,0 +1,68 @@
+book_id: "hyp"
+book_title: "Hatha Yoga Pradipika"
+author: "Yogi Svatmarama / Swami Muktibodhananda"
+edition: "Bihar School of Yoga"
+pdf_path: "docs/Hatha-Yoga-Pradipika-pages-2.pdf"
+output_path: "chunks.jsonl"
+
+# Selected chunking strategy: 'verse' or 'standard'
+chunking_strategy: "verse"
+
+# Embedding model configuration (Standardized strictly on OpenAI)
+embedding:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  dimension: 1536
+
+# Vector database storage configuration
+vector_db:
+  type: "chromadb"
+  persist_directory: "chroma_db"
+  collection_name: "yoga_scriptures"
+  distance_metric: "cosine"
+
+# Settings for verse-based strategy (Strategy 1: 2-tier verse + commentary)
+verse_strategy:
+  max_chunk_size: 2000
+  max_tokens: 600
+  chunk_overlap: 0
+  isolate_sanskrit_sloka: true
+
+# Settings for standard narrative strategy (Strategy 2: recursive character splitting)
+standard_strategy:
+  chunk_size: 1500
+  max_tokens: 600
+  chunk_overlap: 150
+
+# Relative margin ratios (percentage of page height) for resolution/trim independence
+margins:
+  header_top_ratio: 0.07       # Top 7% of page height
+  footer_bottom_ratio: 0.945   # Bottom 5.5% of page height
+
+# Chapter structure with starting/cover pages
+chapters:
+  1:
+    number: 1
+    title: "Asana"
+    cover_page: 1
+  2:
+    number: 2
+    title: "Shatkarma and Pranayama"
+    cover_page: 125
+  3:
+    number: 3
+    title: "Mudra and Bandha"
+    cover_page: 253
+  4:
+    number: 4
+    title: "Samadhi"
+    cover_page: 436
+
+# Publisher typographical corrections (e.g. Page 86 printed as Verse 57 between 36 and 38)
+publisher_errata:
+  86:
+    chapter: 1
+    misprint_start: 57
+    corrected_start: 37
+    corrected_end: 37
+    extra: ""
