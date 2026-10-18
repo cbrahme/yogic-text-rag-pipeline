@@ -95,3 +95,4 @@ ollama==0.6.2
 tiktoken==0.14.0
 rank-bm25==0.2.2
 openai==2.48.0
+streamlit>=1.38.0
