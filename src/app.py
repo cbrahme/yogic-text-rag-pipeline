@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Streamlit Web Application: Hatha Yoga Scripture AI Scholar (Step 9 Web UI)
-==========================================================================
+Streamlit Web Application: YogicScholar (Step 9 Web UI)
+=========================================================
 Provides:
 1. Browser-based conversational chat interface with streaming responses.
 2. Multi-turn conversation memory with pronoun resolution.
 3. Collapsible source attribution accordion showing exact retrieved scripture
    excerpts, verse metadata, and verified citations.
-4. Sidebar controls for chapter filtering, top-k retrieval depth, temperature,
-   and quick-start starter questions.
+4. Sidebar controls for chapter filtering and quick-start starter questions.
 """
 
 import os
@@ -24,13 +23,18 @@ from prompt_engine import (
     align_query_terminology
 )
 
+# Default generation & retrieval parameters
+DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_TOP_K = 4
+DEFAULT_TEMPERATURE = 0.2
+
 # Load environment variables
 load_dotenv()
 
 # Page configuration
 st.set_page_config(
-    page_title="Hatha Yoga Scripture AI Scholar",
-    page_icon="🕉️",
+    page_title="YogicScholar",
+    page_icon="🧘",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -111,7 +115,7 @@ if "sources_history" not in st.session_state:
 # ============================================================================
 
 with st.sidebar:
-    st.markdown("### 🕉️ Scripture Controls")
+    st.markdown("### 🧘 Scripture Controls")
     st.markdown("**Book**: *Hatha Yoga Pradipika*  \n*(Yogi Svatmarama / Swami Muktibodhananda)*")
 
     # Chapter filter
@@ -124,13 +128,6 @@ with st.sidebar:
     }
     selected_ch_label = st.selectbox("Filter by Chapter:", list(chapter_options.keys()))
     selected_chapter = chapter_options[selected_ch_label]
-
-    # Model & Retrieval settings
-    st.markdown("---")
-    st.markdown("### ⚙️ Generation Settings")
-    model_choice = st.selectbox("OpenAI Model:", ["gpt-4o-mini", "gpt-4o"], index=0)
-    top_k = st.slider("Retrieval Depth (Chunks $k$):", min_value=1, max_value=8, value=4)
-    temperature = st.slider("Creativity (Temperature):", min_value=0.0, max_value=0.6, value=0.2, step=0.05)
 
     st.markdown("---")
     st.markdown("### 💡 Quick-Start Questions")
@@ -156,10 +153,9 @@ with st.sidebar:
 # Main Header
 # ============================================================================
 
-st.markdown('<div class="main-title">🕉️ Hatha Yoga Scripture AI Scholar</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🧘 YogicScholar</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-title">Faithful, citation-grounded conversational RAG based on the <i>Hatha Yoga Pradipika</i> '
-    '(Bihar School of Yoga edition).</div>',
+    '<div class="sub-title">Faithful, citation-grounded conversational RAG based on the <i>Hatha Yoga Pradipika</i>.</div>',
     unsafe_allow_html=True
 )
 
@@ -227,7 +223,7 @@ if prompt:
     with st.spinner("Consulting classical scripture index..."):
         retrieved_sources = retriever.search(
             query=search_query,
-            top_k=top_k,
+            top_k=DEFAULT_TOP_K,
             chapter=selected_chapter
         )
 
@@ -246,9 +242,9 @@ if prompt:
     # 5. Stream Assistant Response
     with st.chat_message("assistant"):
         stream = client.chat.completions.create(
-            model=model_choice,
+            model=DEFAULT_MODEL,
             messages=messages,
-            temperature=temperature,
+            temperature=DEFAULT_TEMPERATURE,
             stream=True
         )
 
