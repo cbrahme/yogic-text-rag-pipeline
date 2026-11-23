@@ -2,6 +2,7 @@
 
 > An intelligent, hybrid Retrieval-Augmented Generation (RAG) system specialized in classical yogic scriptures, featuring verse-level chunking, Sanskrit terminology alignment, verified citation grounding, and an interactive Streamlit UI.
 
+[![Tests](https://github.com/cbrahme/yogic-text-rag-pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/cbrahme/yogic-text-rag-pipeline/actions/workflows/tests.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B.svg)](https://streamlit.io/)
@@ -180,6 +181,8 @@ The test suite includes 70+ automated tests covering text extraction, BPE token 
 ```bash
 python -m unittest discover test
 ```
+
+Tests also run automatically on GitHub Actions (Python 3.10, 3.11 and 3.12) for every push to `main` and every pull request. They need no API key, index or PDF: OpenAI calls are mocked and ChromaDB uses temporary directories.
 
 ---
 
