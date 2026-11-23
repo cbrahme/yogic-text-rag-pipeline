@@ -69,6 +69,11 @@ st.markdown("""
         margin-bottom: 0.4rem;
         border: 1px solid #FFEEBA;
     }
+    .citation-badge.approx {
+        background-color: #E2E3E5;
+        color: #383D41;
+        border: 1px solid #D6D8DB;
+    }
     .citation-badge.unverified {
         background-color: #F8D7DA;
         color: #721C24;
@@ -152,13 +157,19 @@ def render_sources(sources, citations):
             st.markdown("**Citations in Response:**")
             badges = []
             for c in citations:
-                if c.get("verified"):
-                    badges.append(f'<span class="citation-badge" title="Matches a retrieved excerpt">✓ {c["raw"]}</span>')
+                match = c.get("match") or ("exact" if c.get("verified") else "none")
+                if match == "exact":
+                    badges.append(f'<span class="citation-badge" title="Exactly matches a retrieved excerpt">✓ {c["raw"]}</span>')
+                elif match == "approx":
+                    badges.append(f'<span class="citation-badge approx" title="Falls within a retrieved excerpt, but its verse/page numbers are narrower than the excerpt\'s">≈ {c["raw"]}</span>')
                 else:
                     badges.append(f'<span class="citation-badge unverified" title="Does not match any retrieved excerpt">⚠ {c["raw"]}</span>')
             st.markdown(" ".join(badges), unsafe_allow_html=True)
-            if any(not c.get("verified") for c in citations):
-                st.caption("⚠ = cited chapter/verse/pages do not match any excerpt retrieved for this answer; treat with caution.")
+            st.caption(
+                "✓ exactly matches a retrieved excerpt · "
+                "≈ within a retrieved excerpt, but the exact verse/page numbers are not confirmed · "
+                "⚠ matches no retrieved excerpt; treat with caution"
+            )
             st.markdown("")
 
         for s_idx, s in enumerate(sources, start=1):
