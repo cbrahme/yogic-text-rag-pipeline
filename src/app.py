@@ -11,6 +11,8 @@ Provides:
 """
 
 import os
+import traceback
+import openai
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -28,6 +30,7 @@ from prompt_engine import (
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TOP_K = 4
 DEFAULT_TEMPERATURE = 0.2
+OPENAI_TIMEOUT_SECONDS = 60  # fail fast instead of the SDK's 10-minute default
 
 # Load environment variables
 load_dotenv()
@@ -105,7 +108,41 @@ def get_openai_client():
     if not api_key:
         st.error("⚠️ `OPENAI_API_KEY` not found in environment or `.env` file. Please configure it to enable chat.")
         st.stop()
-    return OpenAI(api_key=api_key)
+    return OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SECONDS)
+
+
+def friendly_error_message(exc: Exception) -> str:
+    """Maps OpenAI / unexpected exceptions to a short, actionable message for the user."""
+    if isinstance(exc, openai.AuthenticationError):
+        return "The OpenAI API key was rejected. Check `OPENAI_API_KEY` in your `.env` file or deployment secrets."
+    if isinstance(exc, openai.PermissionDeniedError):
+        return "This OpenAI API key does not have access to the required model."
+    if isinstance(exc, openai.RateLimitError):
+        if "insufficient_quota" in str(exc):
+            return "The OpenAI account has run out of credits. Add billing/credits and try again."
+        return "OpenAI is rate-limiting requests right now. Please wait a few seconds and try again."
+    if isinstance(exc, openai.APITimeoutError):
+        return "OpenAI took too long to respond. Please try again."
+    if isinstance(exc, openai.APIConnectionError):
+        return "Could not reach OpenAI. Check your internet connection and try again."
+    if isinstance(exc, openai.BadRequestError):
+        return "OpenAI rejected the request (it may be too long). Try a shorter question or clear the chat memory."
+    if isinstance(exc, openai.APIStatusError):
+        return f"OpenAI returned an error (HTTP {exc.status_code}). Please try again shortly."
+    return "Something went wrong while answering. Please try again."
+
+
+def abandon_turn(stage: str, exc: Exception) -> None:
+    """
+    Shows a friendly error, logs the details to the server console, and drops the
+    unanswered question from history so the conversation stays consistent.
+    """
+    print(f"[YogicScholar] Error during {stage}:\n{traceback.format_exc()}", flush=True)
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        st.session_state.messages.pop()
+    st.error(f"⚠️ {friendly_error_message(exc)}")
+    st.caption("Your question was not saved, so you can ask it again.")
+    st.stop()
 
 
 def render_sources(sources, citations):
@@ -242,12 +279,16 @@ if prompt:
                 search_query = f"{prompt} ({', '.join(aligned_terms)})"
 
     # 3. Retrieve Scripture Chunks
-    with st.spinner("Consulting classical scripture index..."):
-        retrieved_sources = retriever.search(
-            query=search_query,
-            top_k=DEFAULT_TOP_K,
-            chapter=selected_chapter
-        )
+    # (search embeds the query via OpenAI, so it can fail like the chat call)
+    try:
+        with st.spinner("Consulting classical scripture index..."):
+            retrieved_sources = retriever.search(
+                query=search_query,
+                top_k=DEFAULT_TOP_K,
+                chapter=selected_chapter
+            )
+    except Exception as e:
+        abandon_turn("retrieval", e)
 
     # 4. Construct Prompt Messages
     recent_history = [
@@ -263,20 +304,29 @@ if prompt:
 
     # 5. Stream Assistant Response
     with st.chat_message("assistant"):
-        stream = client.chat.completions.create(
-            model=DEFAULT_MODEL,
-            messages=messages,
-            temperature=DEFAULT_TEMPERATURE,
-            stream=True
-        )
+        try:
+            stream = client.chat.completions.create(
+                model=DEFAULT_MODEL,
+                messages=messages,
+                temperature=DEFAULT_TEMPERATURE,
+                stream=True
+            )
 
-        def stream_generator():
-            for chunk in stream:
-                content = chunk.choices[0].delta.content or ""
-                if content:
-                    yield content
+            def stream_generator():
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    content = chunk.choices[0].delta.content or ""
+                    if content:
+                        yield content
 
-        full_response = st.write_stream(stream_generator)
+            full_response = st.write_stream(stream_generator)
+        except Exception as e:
+            # Covers failures both before streaming starts and mid-stream
+            abandon_turn("answer generation", e)
+
+        if not isinstance(full_response, str) or not full_response.strip():
+            abandon_turn("answer generation", RuntimeError("Empty response from model"))
 
         # 6. Extract citations and check them against the retrieved excerpts
         citations = verify_citations(extract_citations(full_response), retrieved_sources)
