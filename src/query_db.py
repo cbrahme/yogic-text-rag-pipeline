@@ -6,7 +6,8 @@ Provides unified retrieval across yoga scriptures combining:
 1. Dense Semantic Retrieval:
    - OpenAI `text-embedding-3-small` (1536 dims) embeddings queried via ChromaDB cosine space.
 2. Sparse Keyword Retrieval:
-   - In-memory BM25 index via `rank-bm25` directly from `chunks.jsonl` (40ms build time).
+   - In-memory BM25 index via `rank-bm25`, built from the documents already stored in ChromaDB
+     (or from an explicit `chunks.jsonl` when one is passed), so the app only needs `chroma_db/`.
    - Guarantees 100% precision on technical and transliterated Sanskrit terms (Viparita Karani, Sushumna, etc.).
 3. Reciprocal Rank Fusion (RRF):
    - Merges dense and sparse result lists using Cormack's RRF algorithm ($k=60$).
@@ -113,9 +114,9 @@ class HybridRetriever:
         self.manager = ChromaManager(self.config)
         self.collection = self.manager.collection
 
-        # Resolve paths
-        self.chunks_path = chunks_jsonl_path or self.config.get("output_path", "chunks.jsonl")
-        if not os.path.exists(self.chunks_path):
+        # Optional explicit chunks file; when None, the BM25 corpus is loaded from ChromaDB
+        self.chunks_path = chunks_jsonl_path
+        if self.chunks_path is not None and not os.path.exists(self.chunks_path):
             raise FileNotFoundError(f"Chunks file not found at: {self.chunks_path}")
 
         # Embedding model config
@@ -141,22 +142,63 @@ class HybridRetriever:
             self._openai_client = OpenAI(api_key=self.api_key)
         return self._openai_client
 
-    def _build_bm25_index(self) -> None:
-        """Builds in-memory BM25Okapi index directly from chunks.jsonl."""
-        t0 = time.time()
-        corpus = []
-        with open(self.chunks_path, "r", encoding="utf-8") as f:
+    def _load_chunks_from_jsonl(self, path: str) -> List[Dict[str, Any]]:
+        """Loads chunk records from a chunks.jsonl file."""
+        chunks = []
+        with open(path, "r", encoding="utf-8") as f:
             for line in f:
-                if not line.strip():
-                    continue
-                chunk = json.loads(line)
-                self.chunks.append(chunk)
-                self.chunk_by_id[chunk["chunk_id"]] = chunk
-                corpus.append(tokenize_for_bm25(chunk["content"]))
+                if line.strip():
+                    chunks.append(json.loads(line))
+        return chunks
 
-        self.bm25 = BM25Okapi(corpus)
-        elapsed_ms = (time.time() - t0) * 1000
-        # print(f"[*] Built BM25 index across {len(self.chunks)} chunks in {elapsed_ms:.1f}ms")
+    def _load_chunks_from_chroma(self, page_size: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Rebuilds chunk records (metadata + content) from the ChromaDB collection,
+        so retrieval needs only the persisted vector store and no chunks.jsonl.
+        """
+        chunks = []
+        offset = 0
+        while True:
+            res = self.collection.get(
+                include=["documents", "metadatas"],
+                limit=page_size,
+                offset=offset
+            )
+            ids = res.get("ids") or []
+            if not ids:
+                break
+            for c_id, doc, meta in zip(ids, res["documents"], res["metadatas"]):
+                chunk = self.manager.deserialize_metadata(meta or {})
+                chunk["chunk_id"] = c_id
+                chunk["content"] = doc or ""
+                chunks.append(chunk)
+            if len(ids) < page_size:
+                break
+            offset += page_size
+        # Deterministic corpus order regardless of storage order
+        chunks.sort(key=lambda c: c["chunk_id"])
+        return chunks
+
+    def _build_bm25_index(self) -> None:
+        """Builds the in-memory BM25Okapi index from chunks.jsonl (if given) or ChromaDB."""
+        if self.chunks_path is not None:
+            chunks = self._load_chunks_from_jsonl(self.chunks_path)
+            source = self.chunks_path
+        else:
+            chunks = self._load_chunks_from_chroma()
+            persist_dir = self.config.get("vector_db", {}).get("persist_directory", "chroma_db")
+            source = f"ChromaDB collection '{self.collection.name}' at '{persist_dir}'"
+
+        if not chunks:
+            raise RuntimeError(
+                f"No indexed chunks found in {source}. Build the index first with "
+                f"`python src/embed_and_index.py --config <config.yaml>`, and run the app "
+                f"from the project root so relative paths resolve."
+            )
+
+        self.chunks = chunks
+        self.chunk_by_id = {c["chunk_id"]: c for c in chunks}
+        self.bm25 = BM25Okapi([tokenize_for_bm25(c["content"]) for c in chunks])
 
     def embed_query(self, query: str) -> List[float]:
         """Embeds query text using OpenAI text-embedding-3-small."""
@@ -532,7 +574,7 @@ def run_interactive_loop(retriever: HybridRetriever, mode: str = "hybrid") -> No
 def main():
     parser = argparse.ArgumentParser(description="Hybrid Semantic & Lexical Scripture Retrieval")
     parser.add_argument("--config", default="configs/hatha_yoga_pradipika.yaml", help="Path to YAML config")
-    parser.add_argument("--chunks", default=None, help="Path to chunks.jsonl")
+    parser.add_argument("--chunks", default=None, help="Optional path to chunks.jsonl (defaults to loading chunks from ChromaDB)")
     parser.add_argument("--query", "-q", default=None, help="Search query string")
     parser.add_argument("--mode", "-m", choices=["hybrid", "dense", "bm25"], default="hybrid", help="Retrieval mode (default: hybrid)")
     parser.add_argument("--top-k", "-k", type=int, default=5, help="Number of results to return (default: 5)")

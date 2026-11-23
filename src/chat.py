@@ -28,6 +28,7 @@ from prompt_engine import (
     SYSTEM_PROMPT_TEMPLATE,
     build_rag_messages,
     extract_citations,
+    verify_citations,
     align_query_terminology
 )
 
@@ -148,7 +149,7 @@ class ChatSession:
         assistant_reply = "".join(full_content)
         self.history.append({"role": "user", "content": query})
         self.history.append({"role": "assistant", "content": assistant_reply})
-        self.last_citations = extract_citations(assistant_reply)
+        self.last_citations = verify_citations(extract_citations(assistant_reply), self.last_sources)
 
     def ask(
         self,
@@ -169,6 +170,14 @@ class ChatSession:
         self.last_query = None
         self.last_sources = []
         self.last_citations = []
+
+
+def print_citations(citations: List[Dict[str, Any]]) -> None:
+    """Prints citations with ✓ (matches a retrieved excerpt) or ⚠ (no match)."""
+    print("[*] Citations in Response (✓ = matches a retrieved excerpt, ⚠ = no match):")
+    for cit in citations:
+        mark = "✓" if cit.get("verified") else "⚠"
+        print(f"    {mark} {cit['raw']} (Chapter {cit['chapter']}, Verse {cit['verse']}, pp. {cit['pages']})")
 
 
 # ============================================================================
@@ -223,9 +232,7 @@ def run_chat_loop(session: ChatSession) -> None:
                         show_full = (len(cmd) > 1 and cmd[1] == "full")
                         print(format_search_results(session.last_sources, full_content=show_full))
                         if session.last_citations:
-                            print("[*] Verified Citations in Response:")
-                            for cit in session.last_citations:
-                                print(f"    ✓ {cit['raw']} (Chapter {cit['chapter']}, Verse {cit['verse']}, pp. {cit['pages']})")
+                            print_citations(session.last_citations)
                             print()
                 elif cmd[0] == ":k" and len(cmd) > 1 and cmd[1].isdigit():
                     session.top_k = int(cmd[1])
@@ -315,9 +322,7 @@ def main():
         if args.sources and session.last_sources:
             print(format_search_results(session.last_sources))
             if session.last_citations:
-                print("[*] Verified Citations in Response:")
-                for cit in session.last_citations:
-                    print(f"    ✓ {cit['raw']} (Chapter {cit['chapter']}, Verse {cit['verse']}, pp. {cit['pages']})")
+                print_citations(session.last_citations)
                 print()
         return
 

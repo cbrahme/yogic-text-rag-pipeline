@@ -20,6 +20,7 @@ from prompt_engine import (
     SYSTEM_PROMPT_TEMPLATE,
     build_rag_messages,
     extract_citations,
+    verify_citations,
     align_query_terminology
 )
 
@@ -65,6 +66,11 @@ st.markdown("""
         margin-bottom: 0.4rem;
         border: 1px solid #FFEEBA;
     }
+    .citation-badge.unverified {
+        background-color: #F8D7DA;
+        color: #721C24;
+        border: 1px solid #F5C6CB;
+    }
     .source-card {
         background-color: #F8F9FA;
         border-left: 4px solid #B85D19;
@@ -83,7 +89,14 @@ st.markdown("""
 @st.cache_resource(show_spinner="Initializing Scripture Retrieval Engine & Vector DB...")
 def get_retriever():
     """Initializes and caches HybridRetriever across browser sessions."""
-    return HybridRetriever(config_or_path="configs/hatha_yoga_pradipika.yaml")
+    try:
+        return HybridRetriever(config_or_path="configs/hatha_yoga_pradipika.yaml")
+    except (RuntimeError, FileNotFoundError) as e:
+        st.error(
+            "⚠️ The scripture index is not available, so the app cannot answer questions yet.\n\n"
+            f"Details: {e}"
+        )
+        st.stop()
 
 
 @st.cache_resource
@@ -93,6 +106,35 @@ def get_openai_client():
         st.error("⚠️ `OPENAI_API_KEY` not found in environment or `.env` file. Please configure it to enable chat.")
         st.stop()
     return OpenAI(api_key=api_key)
+
+
+def render_sources(sources, citations):
+    """Renders the collapsible source panel with citation verification badges."""
+    with st.expander(f"🔎 Scriptural Sources & Citations ({len(sources)} excerpts retrieved)"):
+        if citations:
+            st.markdown("**Citations in Response:**")
+            badges = []
+            for c in citations:
+                if c.get("verified"):
+                    badges.append(f'<span class="citation-badge" title="Matches a retrieved excerpt">✓ {c["raw"]}</span>')
+                else:
+                    badges.append(f'<span class="citation-badge unverified" title="Does not match any retrieved excerpt">⚠ {c["raw"]}</span>')
+            st.markdown(" ".join(badges), unsafe_allow_html=True)
+            if any(not c.get("verified") for c in citations):
+                st.caption("⚠ = cited chapter/verse/pages do not match any excerpt retrieved for this answer; treat with caution.")
+            st.markdown("")
+
+        for s_idx, s in enumerate(sources, start=1):
+            meta = s.metadata
+            ch_num = meta.get("chapter_number", "?")
+            ch_title = meta.get("chapter_title", "Unknown")
+            v_label = meta.get("verse_label") or "N/A"
+            p_start = meta.get("page_start", "?")
+            p_end = meta.get("page_end", "?")
+
+            st.markdown(f"**Excerpt {s_idx}: [{s.chunk_id}]** — Chapter {ch_num} ({ch_title}), Verse {v_label} (pp. {p_start}-{p_end})")
+            st.text(s.content)
+            st.markdown("---")
 
 
 retriever = get_retriever()
@@ -171,27 +213,7 @@ for idx, msg in enumerate(st.session_state.messages):
         # If assistant, display associated sources accordion if available
         if msg["role"] == "assistant" and idx in st.session_state.sources_history:
             sources_data = st.session_state.sources_history[idx]
-            sources = sources_data.get("sources", [])
-            citations = sources_data.get("citations", [])
-
-            with st.expander(f"🔎 Scriptural Sources & Verified Citations ({len(sources)} excerpts retrieved)"):
-                if citations:
-                    st.markdown("**Verified Citations in Response:**")
-                    badges_html = " ".join([f'<span class="citation-badge">✓ {c["raw"]}</span>' for c in citations])
-                    st.markdown(badges_html, unsafe_allow_html=True)
-                    st.markdown("")
-
-                for s_idx, s in enumerate(sources, start=1):
-                    meta = s.metadata
-                    ch_num = meta.get("chapter_number", "?")
-                    ch_title = meta.get("chapter_title", "Unknown")
-                    v_label = meta.get("verse_label") or "N/A"
-                    p_start = meta.get("page_start", "?")
-                    p_end = meta.get("page_end", "?")
-
-                    st.markdown(f"**Excerpt {s_idx}: [{s.chunk_id}]** — Chapter {ch_num} ({ch_title}), Verse {v_label} (pp. {p_start}-{p_end})")
-                    st.text(s.content)
-                    st.markdown("---")
+            render_sources(sources_data.get("sources", []), sources_data.get("citations", []))
 
 
 # ============================================================================
@@ -256,28 +278,11 @@ if prompt:
 
         full_response = st.write_stream(stream_generator)
 
-        # 6. Extract and verify citations
-        citations = extract_citations(full_response)
+        # 6. Extract citations and check them against the retrieved excerpts
+        citations = verify_citations(extract_citations(full_response), retrieved_sources)
 
         # 7. Render source attribution accordion
-        with st.expander(f"🔎 Scriptural Sources & Verified Citations ({len(retrieved_sources)} excerpts retrieved)"):
-            if citations:
-                st.markdown("**Verified Citations in Response:**")
-                badges_html = " ".join([f'<span class="citation-badge">✓ {c["raw"]}</span>' for c in citations])
-                st.markdown(badges_html, unsafe_allow_html=True)
-                st.markdown("")
-
-            for s_idx, s in enumerate(retrieved_sources, start=1):
-                meta = s.metadata
-                ch_num = meta.get("chapter_number", "?")
-                ch_title = meta.get("chapter_title", "Unknown")
-                v_label = meta.get("verse_label") or "N/A"
-                p_start = meta.get("page_start", "?")
-                p_end = meta.get("page_end", "?")
-
-                st.markdown(f"**Excerpt {s_idx}: [{s.chunk_id}]** — Chapter {ch_num} ({ch_title}), Verse {v_label} (pp. {p_start}-{p_end})")
-                st.text(s.content)
-                st.markdown("---")
+        render_sources(retrieved_sources, citations)
 
     # 8. Record Assistant Turn in Session State
     assistant_idx = len(st.session_state.messages)
