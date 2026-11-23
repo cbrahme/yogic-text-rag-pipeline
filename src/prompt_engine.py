@@ -331,8 +331,9 @@ def build_rag_messages(
 # ============================================================================
 
 # Matches: [Chapter 3, Verse 61-63, pp. 315-318] or [Chapter 1, Verse 15, pp. 45]
+# (also tolerates en/em dashes, which LLMs often emit in ranges)
 CITATION_REGEX = re.compile(
-    r'\[Chapter\s+(?P<chapter>\d+),\s+Verses?\s+(?P<verse>[\d\-]+),\s+pp?\.\s+(?P<pages>[\d\-]+)\]',
+    r'\[Chapter\s+(?P<chapter>\d+),\s+Verses?\s+(?P<verse>\d+(?:\s*[-\u2013\u2014]\s*\d+)?),\s+pp?\.\s+(?P<pages>\d+(?:\s*[-\u2013\u2014]\s*\d+)?)\]',
     re.IGNORECASE
 )
 
@@ -354,6 +355,56 @@ def extract_citations(text: str) -> List[Dict[str, str]]:
             "pages": match.group("pages"),
         })
     return citations
+
+
+def _parse_range(value: Any) -> Optional[Tuple[int, int]]:
+    """Parses '61-63', '15', 15 or '61\u201363' into an inclusive (start, end) tuple."""
+    if value is None:
+        return None
+    nums = [int(n) for n in re.findall(r"\d+", str(value))]
+    if not nums:
+        return None
+    return (min(nums), max(nums))
+
+
+def _ranges_overlap(a: Optional[Tuple[int, int]], b: Optional[Tuple[int, int]]) -> bool:
+    return a is not None and b is not None and a[0] <= b[1] and b[0] <= a[1]
+
+
+def verify_citations(
+    citations: List[Dict[str, Any]],
+    sources: List[SearchResult]
+) -> List[Dict[str, Any]]:
+    """
+    Checks each extracted citation against the metadata of the chunks that were
+    actually retrieved for this answer. A citation is verified when at least one
+    retrieved chunk has the same chapter and overlapping verse and page ranges
+    (overlap rather than equality, because the model may merge adjacent parts of
+    a long verse commentary into one citation).
+
+    Returns copies of the citations with `verified` (bool) and
+    `matched_chunk_ids` (list of chunk ids that support it).
+    """
+    results = []
+    for cit in citations:
+        cit_ch = _safe_int(cit.get("chapter"), -1)
+        cit_verses = _parse_range(cit.get("verse"))
+        cit_pages = _parse_range(cit.get("pages"))
+
+        matched = []
+        for src in sources:
+            meta = src.metadata or {}
+            if _safe_int(meta.get("chapter_number"), -2) != cit_ch:
+                continue
+            src_verses = _parse_range(meta.get("verse_label")) or _parse_range(
+                f"{meta.get('verse_start', '')}-{meta.get('verse_end', '')}"
+            )
+            src_pages = _parse_range(f"{meta.get('page_start', '')}-{meta.get('page_end', '')}")
+            if _ranges_overlap(cit_verses, src_verses) and _ranges_overlap(cit_pages, src_pages):
+                matched.append(src.chunk_id)
+
+        results.append({**cit, "verified": bool(matched), "matched_chunk_ids": matched})
+    return results
 
 
 # ============================================================================

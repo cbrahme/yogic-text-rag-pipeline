@@ -286,6 +286,42 @@ class TestHybridRetriever(unittest.TestCase):
         for h in hits_ch2:
             self.assertEqual(h.metadata["chapter_number"], 2)
 
+    def _index_sample_into_chroma(self, retriever_config):
+        """Adds the sample chunks to the test ChromaDB collection with dummy embeddings."""
+        from chroma_manager import ChromaManager
+        manager = ChromaManager(retriever_config)
+        manager.collection.add(
+            ids=[c["chunk_id"] for c in self.sample_data],
+            documents=[c["content"] for c in self.sample_data],
+            metadatas=[ChromaManager.sanitize_metadata(c) for c in self.sample_data],
+            embeddings=[[0.1] * 8 for _ in self.sample_data],
+        )
+
+    def test_bm25_built_from_chroma_without_jsonl(self):
+        """Without a chunks.jsonl, the BM25 corpus is rebuilt from ChromaDB documents + metadata."""
+        config = dict(self.config, output_path=os.path.join(self.temp_dir, "missing.jsonl"))
+        self._index_sample_into_chroma(config)
+
+        retriever = HybridRetriever(config)
+        self.assertEqual(len(retriever.chunks), len(self.sample_data))
+
+        hits = retriever.search_bm25("Ujjayi psychic breath", top_k=2)
+        self.assertEqual(hits[0].chunk_id, "hyp_ch02_v051-053_p01")
+        self.assertIn("UJJAYI", hits[0].content)
+        # Metadata is restored with native types (image_paths list, int chapter) for filtering & display
+        self.assertEqual(hits[0].metadata["chapter_number"], 2)
+        self.assertEqual(hits[0].metadata["image_paths"], [])
+
+        hits_ch1 = retriever.search("breath", mode="bm25", chapter=1)
+        for h in hits_ch1:
+            self.assertEqual(h.metadata["chapter_number"], 1)
+
+    def test_empty_index_raises_clear_error(self):
+        """An empty/missing ChromaDB collection raises a RuntimeError explaining how to build it."""
+        with self.assertRaises(RuntimeError) as ctx:
+            HybridRetriever(self.config)
+        self.assertIn("embed_and_index.py", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

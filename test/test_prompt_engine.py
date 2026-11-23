@@ -28,6 +28,7 @@ from prompt_engine import (
     format_context_for_prompt,
     build_rag_messages,
     extract_citations,
+    verify_citations,
     _safe_int
 )
 
@@ -253,6 +254,58 @@ class TestCitationExtractor(unittest.TestCase):
         text = "This is a statement without any citations."
         citations = extract_citations(text)
         self.assertEqual(citations, [])
+
+    def test_extract_citations_with_en_dash_ranges(self):
+        citations = extract_citations("See [Chapter 3, Verses 61\u201363, pp. 315\u2013318].")
+        self.assertEqual(len(citations), 1)
+        self.assertEqual(citations[0]["chapter"], "3")
+
+
+class TestCitationVerification(unittest.TestCase):
+    """Verifies citations are checked against the metadata of retrieved chunks."""
+
+    def setUp(self):
+        self.sources = [
+            SearchResult(
+                chunk_id="hyp_ch03_v061-063_p01", content="...",
+                metadata={"chapter_number": 3, "verse_label": "61-63", "verse_start": 61,
+                          "verse_end": 63, "page_start": 315, "page_end": 318},
+                score=1.0
+            ),
+            SearchResult(
+                chunk_id="hyp_ch01_v015_p02", content="...",
+                metadata={"chapter_number": 1, "verse_label": "15", "verse_start": 15,
+                          "verse_end": 15, "page_start": 46, "page_end": 47},
+                score=0.9
+            ),
+        ]
+
+    def _verify(self, text):
+        return verify_citations(extract_citations(text), self.sources)
+
+    def test_exact_match_is_verified(self):
+        result = self._verify("[Chapter 3, Verses 61-63, pp. 315-318]")
+        self.assertTrue(result[0]["verified"])
+        self.assertEqual(result[0]["matched_chunk_ids"], ["hyp_ch03_v061-063_p01"])
+
+    def test_overlapping_verse_and_pages_is_verified(self):
+        # Model merged parts of a long commentary: pages 45-47 overlap chunk pages 46-47
+        result = self._verify("[Chapter 1, Verse 15, pp. 45-47] and [Chapter 3, Verse 62, p. 316]")
+        self.assertTrue(all(c["verified"] for c in result))
+
+    def test_wrong_chapter_verse_or_pages_is_unverified(self):
+        result = self._verify(
+            "[Chapter 2, Verse 15, pp. 46-47] "     # wrong chapter
+            "[Chapter 1, Verse 99, pp. 46-47] "     # verse not retrieved
+            "[Chapter 1, Verse 15, pp. 200-201]"    # pages don't match
+        )
+        self.assertEqual(len(result), 3)
+        self.assertFalse(any(c["verified"] for c in result))
+        self.assertEqual(result[0]["matched_chunk_ids"], [])
+
+    def test_no_sources_means_unverified(self):
+        result = verify_citations(extract_citations("[Chapter 3, Verse 61, p. 315]"), [])
+        self.assertFalse(result[0]["verified"])
 
 
 if __name__ == "__main__":
