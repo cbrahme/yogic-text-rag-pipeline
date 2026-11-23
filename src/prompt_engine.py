@@ -36,13 +36,11 @@ Your primary mission is to provide accurate, respectful, and scripturally faithf
 
 ### MANDATORY CITATION CONTRACT:
 1. Every factual statement, technique instruction, philosophical premise, benefit, or contraindication MUST cite its scriptural source.
-2. Citations must follow the exact format: `[Chapter X, Verse Y, pp. Z-W]` or `[Chapter X, Verses Y-Z, pp. Z-W]`.
-   - Examples:
-     * `[Chapter 3, Verses 61-63, pp. 315-318]`
-     * `[Chapter 1, Verse 15, pp. 45-46]`
-     * `[Chapter 2, Verses 51-53, pp. 217-219]`
-3. If multiple excerpts support a claim, cite all relevant references.
-4. Do not invent verse numbers or page ranges not present in the excerpt metadata.
+2. Every excerpt in the context has a "Cite as:" line. Copy that citation EXACTLY, character for character, e.g. [Chapter 3, Verses 61-63, pp. 315-318] or [Chapter 1, Verse 15, pp. 29-32].
+3. NEVER narrow, split, or recombine a citation. If an excerpt is cited as [Chapter 2, Verses 59-65, pp. 229-233], do not cite "Verse 62, pp. 231-232": the excerpt does not tell you which page a single verse is on. Cite the full excerpt citation instead.
+4. Never invent verse numbers or page ranges that do not appear in a "Cite as:" line.
+5. If multiple excerpts support a claim, cite each of them (one bracketed citation per excerpt).
+6. Write citations as plain text in square brackets. Never wrap them in backticks, code formatting, bold, or italics.
 
 ### SCRIPTURAL SAFETY & NON-HALLUCINATION GUARDRAILS:
 1. STRICT FACTUAL GROUNDING: Rely strictly on the provided scriptural excerpts. Never extrapolate, embellish, or invent modern variations, benefits, or medical claims not found in the text.
@@ -239,6 +237,26 @@ def reorder_chunks_chronologically(chunks: List[SearchResult]) -> List[SearchRes
 # 4. Delimited Context Formatting for Prompt Injection
 # ============================================================================
 
+def build_citation_label(meta: Dict[str, Any]) -> Optional[str]:
+    """
+    Builds the canonical citation string for a chunk, e.g.
+    '[Chapter 3, Verses 61-63, pp. 315-318]' or '[Chapter 1, Verse 15, pp. 29-32]'.
+    Uses numeric verse_start/verse_end so labels like '16 (i)' still yield a parseable citation.
+    Returns None when chapter, verse, or page metadata is missing.
+    """
+    ch = meta.get("chapter_number")
+    v_range = _parse_range(f"{meta.get('verse_start', '')}-{meta.get('verse_end', '')}") or _parse_range(meta.get("verse_label"))
+    p_range = _parse_range(f"{meta.get('page_start', '')}-{meta.get('page_end', '')}")
+    if ch is None or v_range is None or p_range is None:
+        return None
+    if v_range[0] == v_range[1]:
+        verse_part = f"Verse {v_range[0]}"
+    else:
+        verse_part = f"Verses {v_range[0]}-{v_range[1]}"
+    page_part = f"p. {p_range[0]}" if p_range[0] == p_range[1] else f"pp. {p_range[0]}-{p_range[1]}"
+    return f"[Chapter {ch}, {verse_part}, {page_part}]"
+
+
 def format_context_for_prompt(chunks: List[SearchResult]) -> str:
     """
     Formats retrieved and chronologically sorted chunks into clean,
@@ -264,9 +282,11 @@ def format_context_for_prompt(chunks: List[SearchResult]) -> str:
 
         header = f"--- EXCERPT {idx}: Chapter {ch_num} ({ch_title}){verse_str}{sub_tag} | Pages {p_start}-{p_end} ---"
         chunk_source = f"[Chunk ID: {c.chunk_id}]"
+        cite_label = build_citation_label(meta)
+        cite_line = f"Cite as: {cite_label}\n" if cite_label else ""
         body = c.content.strip()
 
-        sections.append(f"{header}\n{chunk_source}\n{body}")
+        sections.append(f"{header}\n{chunk_source}\n{cite_line}{body}")
 
     return "\n\n".join(sections)
 
@@ -319,7 +339,7 @@ def build_rag_messages(
         f"{context_str}\n\n"
         f"INSTRUCTION:\n"
         f"Answer strictly and specifically what the user asked (e.g. if asked 'What is X', define and explain X without unrequested technique or benefit lists). "
-        f"Faithfully ground your answer in the retrieved scriptural excerpts above, adhering to the Mandatory Citation Contract using [Chapter X, Verse Y, pp. Z-W] format."
+        f"Faithfully ground your answer in the retrieved scriptural excerpts above, adhering to the Mandatory Citation Contract: copy each excerpt's 'Cite as:' citation exactly, as plain text, without narrowing its verse or page range."
     )
     messages.append({"role": "user", "content": user_content})
 
@@ -371,39 +391,61 @@ def _ranges_overlap(a: Optional[Tuple[int, int]], b: Optional[Tuple[int, int]]) 
     return a is not None and b is not None and a[0] <= b[1] and b[0] <= a[1]
 
 
+def _citation_key(chapter: Any, verses: Optional[Tuple[int, int]], pages: Optional[Tuple[int, int]]):
+    return (_safe_int(chapter, -1), verses, pages)
+
+
 def verify_citations(
     citations: List[Dict[str, Any]],
     sources: List[SearchResult]
 ) -> List[Dict[str, Any]]:
     """
     Checks each extracted citation against the metadata of the chunks that were
-    actually retrieved for this answer. A citation is verified when at least one
-    retrieved chunk has the same chapter and overlapping verse and page ranges
-    (overlap rather than equality, because the model may merge adjacent parts of
-    a long verse commentary into one citation).
+    actually retrieved for this answer, at three levels:
 
-    Returns copies of the citations with `verified` (bool) and
-    `matched_chunk_ids` (list of chunk ids that support it).
+    - "exact":  chapter, verse range and page range all equal a retrieved
+                chunk's canonical citation (what the prompt asks the model to copy).
+    - "approx": same chapter and the verse and page ranges overlap a retrieved
+                chunk, but the citation is not identical (e.g. the model narrowed
+                "Verses 59-65, pp. 229-233" to "Verse 62, pp. 231-232", whose
+                per-verse pages are not known from the metadata).
+    - "none":   no retrieved chunk supports it.
+
+    Returns copies of the citations with `match` ("exact" | "approx" | "none"),
+    `verified` (True for exact or approx, kept for backward compatibility) and
+    `matched_chunk_ids` (chunk ids supporting it: exact matches when any exist,
+    otherwise overlapping ones).
     """
     results = []
     for cit in citations:
         cit_ch = _safe_int(cit.get("chapter"), -1)
         cit_verses = _parse_range(cit.get("verse"))
         cit_pages = _parse_range(cit.get("pages"))
+        cit_key = _citation_key(cit_ch, cit_verses, cit_pages)
 
-        matched = []
+        exact, overlapping = [], []
         for src in sources:
             meta = src.metadata or {}
-            if _safe_int(meta.get("chapter_number"), -2) != cit_ch:
+            src_ch = _safe_int(meta.get("chapter_number"), -2)
+            if src_ch != cit_ch:
                 continue
-            src_verses = _parse_range(meta.get("verse_label")) or _parse_range(
+            src_verses = _parse_range(
                 f"{meta.get('verse_start', '')}-{meta.get('verse_end', '')}"
-            )
+            ) or _parse_range(meta.get("verse_label"))
             src_pages = _parse_range(f"{meta.get('page_start', '')}-{meta.get('page_end', '')}")
-            if _ranges_overlap(cit_verses, src_verses) and _ranges_overlap(cit_pages, src_pages):
-                matched.append(src.chunk_id)
+            if _citation_key(src_ch, src_verses, src_pages) == cit_key:
+                exact.append(src.chunk_id)
+            elif _ranges_overlap(cit_verses, src_verses) and _ranges_overlap(cit_pages, src_pages):
+                overlapping.append(src.chunk_id)
 
-        results.append({**cit, "verified": bool(matched), "matched_chunk_ids": matched})
+        if exact:
+            match, matched = "exact", exact
+        elif overlapping:
+            match, matched = "approx", overlapping
+        else:
+            match, matched = "none", []
+
+        results.append({**cit, "match": match, "verified": match != "none", "matched_chunk_ids": matched})
     return results
 
 

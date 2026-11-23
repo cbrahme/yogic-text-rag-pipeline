@@ -173,11 +173,12 @@ class ChatSession:
 
 
 def print_citations(citations: List[Dict[str, Any]]) -> None:
-    """Prints citations with ✓ (matches a retrieved excerpt) or ⚠ (no match)."""
-    print("[*] Citations in Response (✓ = matches a retrieved excerpt, ⚠ = no match):")
+    """Prints citations with ✓ (exact match), ≈ (within a retrieved excerpt) or ⚠ (no match)."""
+    print("[*] Citations in Response (✓ = exact match, ≈ = within a retrieved excerpt, ⚠ = no match):")
+    marks = {"exact": "✓", "approx": "≈", "none": "⚠"}
     for cit in citations:
-        mark = "✓" if cit.get("verified") else "⚠"
-        print(f"    {mark} {cit['raw']} (Chapter {cit['chapter']}, Verse {cit['verse']}, pp. {cit['pages']})")
+        match = cit.get("match") or ("exact" if cit.get("verified") else "none")
+        print(f"    {marks.get(match, '⚠')} {cit['raw']} (Chapter {cit['chapter']}, Verse {cit['verse']}, pp. {cit['pages']})")
 
 
 # ============================================================================
