@@ -139,13 +139,13 @@ def render_sources(sources, citations):
                 if match == "exact":
                     badges.append(f'<span class="citation-badge" title="Exactly matches a retrieved excerpt">✓ {c["raw"]}</span>')
                 elif match == "approx":
-                    badges.append(f'<span class="citation-badge approx" title="Falls within a retrieved excerpt, but its verse/page numbers are narrower than the excerpt\'s">≈ {c["raw"]}</span>')
+                    badges.append(f'<span class="citation-badge approx" title="Overlaps a retrieved excerpt, but its verse numbers differ from the excerpt\'s">≈ {c["raw"]}</span>')
                 else:
                     badges.append(f'<span class="citation-badge unverified" title="Does not match any retrieved excerpt">⚠ {c["raw"]}</span>')
             st.markdown(" ".join(badges), unsafe_allow_html=True)
             st.caption(
                 "✓ exactly matches a retrieved excerpt · "
-                "≈ within a retrieved excerpt, but the exact verse/page numbers are not confirmed · "
+                "≈ overlaps a retrieved excerpt, but the exact verses are not confirmed · "
                 "⚠ matches no retrieved excerpt; treat with caution"
             )
             st.markdown("")

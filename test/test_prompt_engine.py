@@ -129,26 +129,29 @@ class TestContextAssembly(unittest.TestCase):
         ordered = [self.chunk_ch1_v26, self.chunk_ch3_p1]
         context_str = format_context_for_prompt(ordered)
 
-        self.assertIn("--- EXCERPT 1: Chapter 1 (Asana), Verse 26 | Pages 64-65 ---", context_str)
+        self.assertIn("--- EXCERPT 1: Chapter 1 (Asana), Verse 26 ---", context_str)
         self.assertIn("[Chunk ID: hyp_ch01_v026_p01]", context_str)
         self.assertIn("Matsyendrasana technique.", context_str)
 
-        self.assertIn("--- EXCERPT 2: Chapter 3 (Mudra), Verse 61-63 (Part 1/4) | Pages 315-318 ---", context_str)
+        self.assertIn("--- EXCERPT 2: Chapter 3 (Mudra), Verse 61-63 (Part 1/4) ---", context_str)
         self.assertIn("[Chunk ID: hyp_ch03_v061-063_p01]", context_str)
         self.assertIn("Moola bandha root sloka and translation.", context_str)
 
         # Each excerpt carries a ready-to-copy canonical citation (singular vs plural verse)
-        self.assertIn("Cite as: [Chapter 1, Verse 26, pp. 64-65]", context_str)
-        self.assertIn("Cite as: [Chapter 3, Verses 61-63, pp. 315-318]", context_str)
+        self.assertIn("Cite as: [Chapter 1, Verse 26]", context_str)
+        self.assertIn("Cite as: [Chapter 3, Verses 61-63]", context_str)
+        # Page numbers are not shown to the model, so it cannot cite them
+        self.assertNotIn("Pages", context_str)
+        self.assertNotIn("pp.", context_str)
 
     def test_build_citation_label(self):
         self.assertEqual(
             build_citation_label({"chapter_number": 2, "verse_start": 51, "verse_end": 53, "page_start": 217, "page_end": 219}),
-            "[Chapter 2, Verses 51-53, pp. 217-219]")
+            "[Chapter 2, Verses 51-53]")
         # Non-numeric label suffix like "16 (i)" still yields a parseable citation from verse_start/end
         self.assertEqual(
             build_citation_label({"chapter_number": 1, "verse_start": 16, "verse_end": 16, "verse_label": "16 (i)", "page_start": 314, "page_end": 314}),
-            "[Chapter 1, Verse 16, p. 314]")
+            "[Chapter 1, Verse 16]")
         # Narrative chunks without verse numbers get no citation label
         self.assertIsNone(build_citation_label({"chapter_number": 1, "verse_start": None, "verse_end": None, "verse_label": None, "page_start": 1, "page_end": 5}))
         # Generated labels round-trip through the extractor
@@ -192,7 +195,7 @@ class TestContextAssembly(unittest.TestCase):
             score=0.9
         )
         formatted = format_context_for_prompt([narrative_chunk])
-        self.assertIn("--- EXCERPT 1: Chapter 1 (Introduction) | Pages 1-5 ---", formatted)
+        self.assertIn("--- EXCERPT 1: Chapter 1 (Introduction) ---", formatted)
         self.assertNotIn("Verse None", formatted)
         self.assertNotIn("Cite as:", formatted)
 
@@ -218,7 +221,7 @@ class TestMessageBuilder(unittest.TestCase):
         self.assertIn("USER QUESTION:\nHow to perform root lock?", user_msg)
         self.assertIn("[Scriptural Terminology Note: The query mentions concepts corresponding to Sanskrit scripture terms: moola bandha]", user_msg)
         self.assertIn("RETRIEVED SCRIPTURAL CONTEXT (Hatha Yoga Pradipika):", user_msg)
-        self.assertIn("--- EXCERPT 1: Chapter 3 (Mudra), Verse 61-63 (Part 1/4) | Pages 315-318 ---", user_msg)
+        self.assertIn("--- EXCERPT 1: Chapter 3 (Mudra), Verse 61-63 (Part 1/4) ---", user_msg)
 
     def test_build_rag_messages_with_chat_history(self):
         chunk = SearchResult(
@@ -229,7 +232,7 @@ class TestMessageBuilder(unittest.TestCase):
         )
         history = [
             {"role": "user", "content": "What is asana?"},
-            {"role": "assistant", "content": "Asana is the first stage of Hatha Yoga [Chapter 1, Verse 17, pp. 48-49]."}
+            {"role": "assistant", "content": "Asana is the first stage of Hatha Yoga [Chapter 1, Verse 17]."}
         ]
         messages = build_rag_messages(
             query="Tell me about Matsyendrasana.",
@@ -278,6 +281,11 @@ class TestCitationExtractor(unittest.TestCase):
         citations = extract_citations(text)
         self.assertEqual(citations, [])
 
+    def test_extract_verse_only_citations(self):
+        citations = extract_citations("Press the heel [Chapter 3, Verses 61-63]; avoid overeating [Chapter 1, Verse 15].")
+        self.assertEqual([(c["chapter"], c["verse"], c["pages"]) for c in citations],
+                         [("3", "61-63", None), ("1", "15", None)])
+
     def test_extract_citations_with_en_dash_ranges(self):
         citations = extract_citations("See [Chapter 3, Verses 61\u201363, pp. 315\u2013318].")
         self.assertEqual(len(citations), 1)
@@ -285,7 +293,7 @@ class TestCitationExtractor(unittest.TestCase):
 
 
 class TestCitationVerification(unittest.TestCase):
-    """Verifies citations are checked against the metadata of retrieved chunks."""
+    """Verifies citations are checked (by chapter and verse) against retrieved chunks."""
 
     def setUp(self):
         self.sources = [
@@ -307,57 +315,49 @@ class TestCitationVerification(unittest.TestCase):
         return verify_citations(extract_citations(text), self.sources)
 
     def test_exact_match_is_verified(self):
-        result = self._verify("[Chapter 3, Verses 61-63, pp. 315-318]")
-        self.assertEqual(result[0]["match"], "exact")
-        self.assertTrue(result[0]["verified"])
+        result = self._verify("[Chapter 3, Verses 61-63] and [Chapter 1, Verse 15]")
+        self.assertEqual([c["match"] for c in result], ["exact", "exact"])
+        self.assertTrue(all(c["verified"] for c in result))
         self.assertEqual(result[0]["matched_chunk_ids"], ["hyp_ch03_v061-063_p01"])
 
-    def test_overlapping_verse_and_pages_is_verified(self):
-        # Model merged parts of a long commentary: pages 45-47 overlap chunk pages 46-47
-        result = self._verify("[Chapter 1, Verse 15, pp. 45-47] and [Chapter 3, Verse 62, p. 316]")
+    def test_narrowed_or_widened_verse_range_is_approx(self):
+        result = self._verify("[Chapter 3, Verse 62] [Chapter 3, Verses 61-62] [Chapter 1, Verses 14-16]")
+        self.assertEqual([c["match"] for c in result], ["approx", "approx", "approx"])
         self.assertTrue(all(c["verified"] for c in result))
-        # Narrowed / altered ranges are only approximate, not exact
-        self.assertEqual([c["match"] for c in result], ["approx", "approx"])
 
     def test_narrowed_citation_from_e2e_run_is_approx(self):
-        """Reproduces the Bhastrika case: model narrowed 'Verses 59-65, pp. 229-233' to one verse."""
+        """Reproduces the Bhastrika case: model narrowed 'Verses 59-65' to one verse."""
         source = SearchResult(
             chunk_id="hyp_ch02_v059-065_p01", content="...",
             metadata={"chapter_number": 2, "verse_label": "59-65", "verse_start": 59, "verse_end": 65,
                       "page_start": 229, "page_end": 233},
             score=1.0
         )
-        result = verify_citations(
-            extract_citations("[Chapter 2, Verse 62, pp. 231-232] [Chapter 2, Verses 59-65, pp. 229-233]"),
-            [source]
-        )
+        result = verify_citations(extract_citations("[Chapter 2, Verse 62] [Chapter 2, Verses 59-65]"), [source])
         self.assertEqual([c["match"] for c in result], ["approx", "exact"])
 
-    def test_single_page_and_singular_forms_match_exactly(self):
-        source = SearchResult(
-            chunk_id="hyp_ch03_v060", content="...",
-            metadata={"chapter_number": 3, "verse_label": "60", "verse_start": 60, "verse_end": 60,
-                      "page_start": 314, "page_end": 314},
-            score=1.0
-        )
-        for text in ["[Chapter 3, Verse 60, p. 314]", "[Chapter 3, Verses 60, pp. 314-314]"]:
-            self.assertEqual(verify_citations(extract_citations(text), [source])[0]["match"], "exact", text)
+    def test_page_numbers_in_old_style_citations_are_ignored(self):
+        # Correct chapter/verse with any (even wrong) pages is still an exact match
+        result = self._verify("[Chapter 3, Verses 61-63, pp. 315-318] [Chapter 1, Verse 15, pp. 200-201]")
+        self.assertEqual([c["match"] for c in result], ["exact", "exact"])
 
-    def test_wrong_chapter_verse_or_pages_is_unverified(self):
+    def test_singular_plural_and_dash_forms_match_exactly(self):
+        for text in ["[Chapter 3, Verses 61\u201363]", "[Chapter 1, Verses 15]", "[chapter 1, verse 15]"]:
+            self.assertEqual(self._verify(text)[0]["match"], "exact", text)
+
+    def test_wrong_chapter_or_verse_is_unverified(self):
         result = self._verify(
-            "[Chapter 2, Verse 15, pp. 46-47] "     # wrong chapter
-            "[Chapter 1, Verse 99, pp. 46-47] "     # verse not retrieved
-            "[Chapter 1, Verse 15, pp. 200-201]"    # pages don't match
+            "[Chapter 2, Verse 15] "     # wrong chapter
+            "[Chapter 1, Verse 99] "     # verse not retrieved
+            "[Chapter 3, Verse 64]"      # just outside the retrieved range
         )
-        self.assertEqual(len(result), 3)
-        self.assertFalse(any(c["verified"] for c in result))
         self.assertEqual([c["match"] for c in result], ["none"] * 3)
+        self.assertFalse(any(c["verified"] for c in result))
         self.assertEqual(result[0]["matched_chunk_ids"], [])
 
     def test_no_sources_means_unverified(self):
-        result = verify_citations(extract_citations("[Chapter 3, Verse 61, p. 315]"), [])
-        self.assertFalse(result[0]["verified"])
-
+        result = verify_citations(extract_citations("[Chapter 3, Verse 61]"), [])
+        self.assertEqual(result[0]["match"], "none")
 
 if __name__ == "__main__":
     unittest.main()

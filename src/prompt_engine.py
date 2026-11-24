@@ -4,7 +4,7 @@ Prompt Architecture, Scriptural Guardrails & Context Assembly Engine (Step 8)
 =============================================================================
 Provides:
 1. `SYSTEM_PROMPT_TEMPLATE`: Authoritative scholar persona, mandatory citation
-   contracts (`[Chapter X, Verse Y, pp. Z-W]`), safety & non-hallucination guardrails,
+   contracts (`[Chapter X, Verse Y]`), safety & non-hallucination guardrails,
    and guru guidance disclaimers.
 2. `YOGA_SYNONYM_LEXICON` & `align_query_terminology`: Bridges English/vernacular
    terms to classical Sanskrit terms at query time with zero corpus annotation.
@@ -36,9 +36,9 @@ Your primary mission is to provide accurate, respectful, and scripturally faithf
 
 ### MANDATORY CITATION CONTRACT:
 1. Every factual statement, technique instruction, philosophical premise, benefit, or contraindication MUST cite its scriptural source.
-2. Every excerpt in the context has a "Cite as:" line. Copy that citation EXACTLY, character for character, e.g. [Chapter 3, Verses 61-63, pp. 315-318] or [Chapter 1, Verse 15, pp. 29-32].
-3. NEVER narrow, split, or recombine a citation. If an excerpt is cited as [Chapter 2, Verses 59-65, pp. 229-233], do not cite "Verse 62, pp. 231-232": the excerpt does not tell you which page a single verse is on. Cite the full excerpt citation instead.
-4. Never invent verse numbers or page ranges that do not appear in a "Cite as:" line.
+2. Every excerpt in the context has a "Cite as:" line. Copy that citation EXACTLY, character for character, e.g. [Chapter 3, Verses 61-63] or [Chapter 1, Verse 15].
+3. NEVER narrow, split, or recombine a citation. If an excerpt is cited as [Chapter 2, Verses 59-65], do not cite "Verse 62" on its own: cite the full excerpt citation instead.
+4. Never invent verse numbers that do not appear in a "Cite as:" line, and never add page numbers to citations.
 5. If multiple excerpts support a claim, cite each of them (one bracketed citation per excerpt).
 6. Write citations as plain text in square brackets. Never wrap them in backticks, code formatting, bold, or italics.
 
@@ -240,21 +240,21 @@ def reorder_chunks_chronologically(chunks: List[SearchResult]) -> List[SearchRes
 def build_citation_label(meta: Dict[str, Any]) -> Optional[str]:
     """
     Builds the canonical citation string for a chunk, e.g.
-    '[Chapter 3, Verses 61-63, pp. 315-318]' or '[Chapter 1, Verse 15, pp. 29-32]'.
+    '[Chapter 3, Verses 61-63]' or '[Chapter 1, Verse 15]'.
+    Citations use chapter and verse only: verse numbering is shared across
+    editions and translations, while page numbers belong to one printed edition.
     Uses numeric verse_start/verse_end so labels like '16 (i)' still yield a parseable citation.
-    Returns None when chapter, verse, or page metadata is missing.
+    Returns None when chapter or verse metadata is missing.
     """
     ch = meta.get("chapter_number")
     v_range = _parse_range(f"{meta.get('verse_start', '')}-{meta.get('verse_end', '')}") or _parse_range(meta.get("verse_label"))
-    p_range = _parse_range(f"{meta.get('page_start', '')}-{meta.get('page_end', '')}")
-    if ch is None or v_range is None or p_range is None:
+    if ch is None or v_range is None:
         return None
     if v_range[0] == v_range[1]:
         verse_part = f"Verse {v_range[0]}"
     else:
         verse_part = f"Verses {v_range[0]}-{v_range[1]}"
-    page_part = f"p. {p_range[0]}" if p_range[0] == p_range[1] else f"pp. {p_range[0]}-{p_range[1]}"
-    return f"[Chapter {ch}, {verse_part}, {page_part}]"
+    return f"[Chapter {ch}, {verse_part}]"
 
 
 def format_context_for_prompt(chunks: List[SearchResult]) -> str:
@@ -271,8 +271,6 @@ def format_context_for_prompt(chunks: List[SearchResult]) -> str:
         ch_num = meta.get("chapter_number") or "?"
         ch_title = meta.get("chapter_title") or "Unknown"
         v_label = meta.get("verse_label")
-        p_start = meta.get("page_start") or "?"
-        p_end = meta.get("page_end") or "?"
         is_sub = meta.get("is_sub_chunk", False)
         sub_idx = _safe_int(meta.get("sub_chunk_index"), 0) + 1
         total_subs = _safe_int(meta.get("total_sub_chunks"), 1)
@@ -280,7 +278,8 @@ def format_context_for_prompt(chunks: List[SearchResult]) -> str:
         sub_tag = f" (Part {sub_idx}/{total_subs})" if is_sub else ""
         verse_str = f", Verse {v_label}" if v_label else ""
 
-        header = f"--- EXCERPT {idx}: Chapter {ch_num} ({ch_title}){verse_str}{sub_tag} | Pages {p_start}-{p_end} ---"
+        # Page numbers are deliberately omitted so the model does not cite them
+        header = f"--- EXCERPT {idx}: Chapter {ch_num} ({ch_title}){verse_str}{sub_tag} ---"
         chunk_source = f"[Chunk ID: {c.chunk_id}]"
         cite_label = build_citation_label(meta)
         cite_line = f"Cite as: {cite_label}\n" if cite_label else ""
@@ -339,7 +338,7 @@ def build_rag_messages(
         f"{context_str}\n\n"
         f"INSTRUCTION:\n"
         f"Answer strictly and specifically what the user asked (e.g. if asked 'What is X', define and explain X without unrequested technique or benefit lists). "
-        f"Faithfully ground your answer in the retrieved scriptural excerpts above, adhering to the Mandatory Citation Contract: copy each excerpt's 'Cite as:' citation exactly, as plain text, without narrowing its verse or page range."
+        f"Faithfully ground your answer in the retrieved scriptural excerpts above, adhering to the Mandatory Citation Contract: copy each excerpt's 'Cite as:' citation exactly, as plain text, without narrowing its verse range or adding page numbers."
     )
     messages.append({"role": "user", "content": user_content})
 
@@ -350,10 +349,12 @@ def build_rag_messages(
 # 6. Citation Extractor & Adherence Validator
 # ============================================================================
 
-# Matches: [Chapter 3, Verse 61-63, pp. 315-318] or [Chapter 1, Verse 15, pp. 45]
-# (also tolerates en/em dashes, which LLMs often emit in ranges)
+# Matches: [Chapter 3, Verses 61-63] or [Chapter 1, Verse 15]. A trailing page
+# part (", pp. 315-318") from older answers or model slips is still recognised
+# but ignored by the check. Tolerates en/em dashes, which LLMs often emit.
 CITATION_REGEX = re.compile(
-    r'\[Chapter\s+(?P<chapter>\d+),\s+Verses?\s+(?P<verse>\d+(?:\s*[-\u2013\u2014]\s*\d+)?),\s+pp?\.\s+(?P<pages>\d+(?:\s*[-\u2013\u2014]\s*\d+)?)\]',
+    r'\[Chapter\s+(?P<chapter>\d+),\s+Verses?\s+(?P<verse>\d+(?:\s*[-\u2013\u2014]\s*\d+)?)'
+    r'(?:,\s+pp?\.\s+(?P<pages>\d+(?:\s*[-\u2013\u2014]\s*\d+)?))?\]',
     re.IGNORECASE
 )
 
@@ -391,10 +392,6 @@ def _ranges_overlap(a: Optional[Tuple[int, int]], b: Optional[Tuple[int, int]]) 
     return a is not None and b is not None and a[0] <= b[1] and b[0] <= a[1]
 
 
-def _citation_key(chapter: Any, verses: Optional[Tuple[int, int]], pages: Optional[Tuple[int, int]]):
-    return (_safe_int(chapter, -1), verses, pages)
-
-
 def verify_citations(
     citations: List[Dict[str, Any]],
     sources: List[SearchResult]
@@ -403,13 +400,14 @@ def verify_citations(
     Checks each extracted citation against the metadata of the chunks that were
     actually retrieved for this answer, at three levels:
 
-    - "exact":  chapter, verse range and page range all equal a retrieved
-                chunk's canonical citation (what the prompt asks the model to copy).
-    - "approx": same chapter and the verse and page ranges overlap a retrieved
-                chunk, but the citation is not identical (e.g. the model narrowed
-                "Verses 59-65, pp. 229-233" to "Verse 62, pp. 231-232", whose
-                per-verse pages are not known from the metadata).
+    - "exact":  chapter and verse range equal a retrieved chunk's canonical
+                citation (what the prompt asks the model to copy).
+    - "approx": same chapter and the verse range overlaps a retrieved chunk,
+                but is not identical (e.g. the model narrowed "Verses 59-65"
+                to "Verse 62", which the excerpt does not single out).
     - "none":   no retrieved chunk supports it.
+
+    Page numbers, if a citation still contains them, are ignored.
 
     Returns copies of the citations with `match` ("exact" | "approx" | "none"),
     `verified` (True for exact or approx, kept for backward compatibility) and
@@ -420,8 +418,6 @@ def verify_citations(
     for cit in citations:
         cit_ch = _safe_int(cit.get("chapter"), -1)
         cit_verses = _parse_range(cit.get("verse"))
-        cit_pages = _parse_range(cit.get("pages"))
-        cit_key = _citation_key(cit_ch, cit_verses, cit_pages)
 
         exact, overlapping = [], []
         for src in sources:
@@ -432,10 +428,9 @@ def verify_citations(
             src_verses = _parse_range(
                 f"{meta.get('verse_start', '')}-{meta.get('verse_end', '')}"
             ) or _parse_range(meta.get("verse_label"))
-            src_pages = _parse_range(f"{meta.get('page_start', '')}-{meta.get('page_end', '')}")
-            if _citation_key(src_ch, src_verses, src_pages) == cit_key:
+            if cit_verses is not None and src_verses == cit_verses:
                 exact.append(src.chunk_id)
-            elif _ranges_overlap(cit_verses, src_verses) and _ranges_overlap(cit_pages, src_pages):
+            elif _ranges_overlap(cit_verses, src_verses):
                 overlapping.append(src.chunk_id)
 
         if exact:
@@ -542,10 +537,11 @@ def main():
         print("\n\n" + "=" * 65)
 
         response_text = "".join(full_response)
-        citations = extract_citations(response_text)
-        print(f"[*] Verified Citations Detected in Response ({len(citations)} found):")
+        citations = verify_citations(extract_citations(response_text), retrieved)
+        marks = {"exact": "✓", "approx": "≈", "none": "⚠"}
+        print(f"[*] Citations Detected in Response ({len(citations)} found):")
         for cit in citations:
-            print(f"    ✓ {cit['raw']} -> Chapter {cit['chapter']}, Verse {cit['verse']}, pp. {cit['pages']}")
+            print(f"    {marks[cit['match']]} {cit['raw']} -> Chapter {cit['chapter']}, Verse {cit['verse']}")
         print("=" * 65 + "\n")
     else:
         print("\n[Tip] Add '--generate' (or '-g') to stream a live answer from gpt-4o-mini and verify citations:")

@@ -18,7 +18,7 @@ Classical yogic texts like the *Hatha Yoga Pradipika* (by Yogi Svatmarama / Swam
 - **Two-Tier Scripture Chunking**: Preserves isolated Sanskrit slokas alongside their English translations and detailed commentary, strictly bounded by character counts and BPE token budgets.
 - **Hybrid Retrieval (Dense + Sparse)**: Blends cosine similarity vector search (`text-embedding-3-small` in ChromaDB) and sparse lexical search (BM25) via Reciprocal Rank Fusion (RRF).
 - **Domain Terminology Normalization**: Automatically aligns modern or colloquial yogic queries (e.g., "root lock", "alternate nostril breathing", "spinal twist") with canonical Sanskrit transliterations (*Moola Bandha*, *Nadi Shodhana*, *Matsyendrasana*).
-- **Citation Guardrails & Verification**: Every excerpt carries a canonical citation (e.g. [Chapter 3, Verses 61-63, pp. 315-318]) that the model must copy exactly, and each citation in an answer is checked against the excerpts actually retrieved (see [Citation checks](#citation-checks)).
+- **Citation Guardrails & Verification**: Every excerpt carries a canonical chapter-and-verse citation (e.g. [Chapter 3, Verses 61-63]) that the model must copy exactly, and each citation in an answer is checked against the excerpts actually retrieved (see [Citation checks](#citation-checks)).
 - **Interactive Interfaces**: Provides both a rich Streamlit web interface with collapsible source excerpts and a terminal REPL.
 
 ---
@@ -184,12 +184,12 @@ CLI commands available inside the chat session:
 In `--query` mode the CLI exits with status 1 and a one-line message on errors (bad key, no index, network failure). Set `YOGIC_DEBUG=1` to print full tracebacks.
 
 ### Citation checks
-Each citation in an answer is compared with the metadata of the excerpts retrieved for that answer:
+Citations use chapter and verse only, such as [Chapter 3, Verses 61-63]. Verse numbering is shared across editions and translations of the *Hatha Yoga Pradipika*, while page numbers belong to one printed edition, so they are left out of answers (source cards in the web app still show them). Each citation in an answer is compared with the excerpts retrieved for that answer:
 
 | Mark | Meaning |
 |---|---|
 | ✓ | Exactly matches a retrieved excerpt's citation |
-| ≈ | Falls within a retrieved excerpt, but its verse/page numbers are narrower than the excerpt's, so the exact verse/pages are not confirmed |
+| ≈ | Overlaps a retrieved excerpt, but its verse range differs (e.g. "Verse 62" when the excerpt covers Verses 59-65), so the exact verses are not confirmed |
 | ⚠ | Matches no retrieved excerpt; treat with caution |
 
 The check confirms a citation points at retrieved text; it does not judge whether the answer's wording is faithful to that text.

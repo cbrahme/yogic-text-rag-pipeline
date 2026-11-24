@@ -196,7 +196,7 @@ def print_citations(citations: List[Dict[str, Any]]) -> None:
     marks = {"exact": "✓", "approx": "≈", "none": "⚠"}
     for cit in citations:
         match = cit.get("match") or ("exact" if cit.get("verified") else "none")
-        print(f"    {marks.get(match, '⚠')} {cit['raw']} (Chapter {cit['chapter']}, Verse {cit['verse']}, pp. {cit['pages']})")
+        print(f"    {marks.get(match, '⚠')} {cit['raw']} (Chapter {cit['chapter']}, Verse {cit['verse']})")
 
 
 # ============================================================================
