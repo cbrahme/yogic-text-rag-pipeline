@@ -18,7 +18,7 @@ Classical yogic texts like the *Hatha Yoga Pradipika* (by Yogi Svatmarama / Swam
 - **Two-Tier Scripture Chunking**: Preserves isolated Sanskrit slokas alongside their English translations and detailed commentary, strictly bounded by character counts and BPE token budgets.
 - **Hybrid Retrieval (Dense + Sparse)**: Blends cosine similarity vector search (`text-embedding-3-small` in ChromaDB) and sparse lexical search (BM25) via Reciprocal Rank Fusion (RRF).
 - **Domain Terminology Normalization**: Automatically aligns modern or colloquial yogic queries (e.g., "root lock", "alternate nostril breathing", "spinal twist") with canonical Sanskrit transliterations (*Moola Bandha*, *Nadi Shodhana*, *Matsyendrasana*).
-- **Citation Guardrails & Verification**: Enforces verifiable academic citation badges `[Chapter X, Verse Y, pp. A-B]` and eliminates hallucinations.
+- **Citation Guardrails & Verification**: Every excerpt carries a canonical citation (e.g. [Chapter 3, Verses 61-63, pp. 315-318]) that the model must copy exactly, and each citation in an answer is checked against the excerpts actually retrieved (see [Citation checks](#citation-checks)).
 - **Interactive Interfaces**: Provides both a rich Streamlit web interface with collapsible source excerpts and a terminal REPL.
 
 ---
@@ -39,11 +39,12 @@ flowchart TD
         User(["User Query"]) --> TermAlign["Terminology Normalizer"]
         TermAlign --> RRF{"Hybrid Retriever (RRF)"}
         RRF -->|Dense Vector Search| Chroma
-        RRF -->|Sparse Lexical Search| BM25["BM25 Index"]
+        RRF -->|Sparse Lexical Search| BM25["BM25 Index (built from ChromaDB documents)"]
+        Chroma -.->|documents + metadata| BM25
         RRF --> Context["Ranked Scripture Context & Metadata"]
         Context --> Prompt["Prompt Engine (Scholar Persona + Guardrails)"]
         Prompt --> LLM["OpenAI LLM (gpt-4o-mini)"]
-        LLM --> Stream["Streaming Response + Verified Citations"]
+        LLM --> Stream["Streaming Response + Citation Check (✓ / ≈ / ⚠)"]
     end
 ```
 
@@ -54,9 +55,11 @@ flowchart TD
 - **Hybrid Search with Reciprocal Rank Fusion (RRF)**: Merges dense embeddings with BM25 keyword matching so both exact Sanskrit terms and thematic queries retrieve top-scoring verses.
 - **Dual-Ceiling Chunking**: Enforces strict dual caps (e.g., $\le$ 2000 characters and $\le$ 600 BPE tokens using `cl100k_base`), with Sanskrit transliteration diacritic-expansion handling.
 - **Conversational Memory**: Follow-up questions with pronouns (e.g., *"What are its benefits?"*) automatically resolve context from prior turns.
-- **Verified Source Attribution**: The Streamlit interface displays exact source cards showing chapter title, verse number, page range, and scripture quotes.
+- **Source Attribution**: The Streamlit interface displays source cards showing chapter title, verse number, page range, and the retrieved scripture text.
+- **Graceful Error Handling**: Invalid API keys, exhausted credits, rate limits, timeouts and network failures show a short, actionable message in both the web app and the CLI instead of a stack trace; the failed question is not saved, so it can simply be asked again.
+- **Runs From Any Directory**: Config and data paths resolve from the project root, and querying never silently creates an empty index.
 - **Config-Driven & Extensible**: Modular YAML configurations allow adding other classical scriptures (*Gheranda Samhita*, *Yoga Sutras*, *Shiva Samhita*) without changing pipeline code.
-- **Comprehensive Test Suite**: 70+ unit tests validating token counters, chunk boundaries, metadata hygiene, retrieval, and chat sessions.
+- **Comprehensive Test Suite**: ~100 unit tests validating token counters, chunk boundaries, metadata hygiene, retrieval, citation checks, error handling and chat sessions, run automatically on GitHub Actions.
 
 ---
 
@@ -72,14 +75,17 @@ flowchart TD
 │   ├── chat.py                     # CLI conversational chat assistant & REPL
 │   ├── chroma_manager.py           # ChromaDB client & metadata contract validator
 │   ├── embed_and_index.py          # Batch vector embedding & idempotent indexing
+│   ├── error_messages.py           # User-facing error messages (app + CLI)
 │   ├── ingestion_pipeline.py       # PDF parsing & two-tier verse chunker
-│   ├── prompt_engine.py            # Prompt templates, term alignment & citation parser
+│   ├── project_paths.py            # Project-root path resolution
+│   ├── prompt_engine.py            # Prompt templates, term alignment, citation checks
 │   └── query_db.py                 # Hybrid retriever (ChromaDB + BM25 via RRF)
-├── test/                           # Comprehensive unit test suite (70+ tests)
+├── test/                           # Unit test suite
+├── .github/workflows/tests.yml     # CI: runs the tests on Python 3.10–3.12
 ├── .env.example                    # Environment variable template
 ├── .gitignore                      # Git exclusion rules
 ├── LICENSE                         # MIT License
-├── requirements.txt                # Python package dependencies
+├── requirements.txt                # Pinned dependencies (direct + transitive)
 └── README.md                       # Project documentation
 ```
 
@@ -90,6 +96,7 @@ flowchart TD
 ### Prerequisites
 - **Python**: 3.10 or higher
 - **OpenAI API Key**: Required for embeddings (`text-embedding-3-small`) and generation (`gpt-4o-mini`).
+- **The scripture PDF**: Not included in this repository, because the translation and commentary are copyrighted. Obtain your own copy of the *Hatha Yoga Pradipika* (Bihar School of Yoga edition) and build the index yourself (see below). The generated `chunks.jsonl` and `chroma_db/` contain the book's text, so they are git-ignored and should not be committed.
 
 ### 1. Clone the Repository
 ```bash
@@ -122,10 +129,10 @@ OPENAI_API_KEY=sk-your-actual-openai-api-key-here
 
 ## Ingestion & Indexing Pipeline
 
-If you want to re-ingest a scripture PDF and build the vector database from scratch:
+The app needs a local ChromaDB index, which you build once from your own copy of the PDF.
 
 ### Step 1: Chunk the PDF Document
-Place your source PDF in `docs/` and run the ingestion pipeline:
+Save your PDF as `docs/Hatha-Yoga-Pradipika-pages-2.pdf` (or point `pdf_path` in the config at it) and run the ingestion pipeline:
 ```bash
 python src/ingestion_pipeline.py --config configs/hatha_yoga_pradipika.yaml
 ```
@@ -140,6 +147,7 @@ python src/embed_and_index.py --config configs/hatha_yoga_pradipika.yaml --dry-r
 # Live indexing:
 python src/embed_and_index.py --config configs/hatha_yoga_pradipika.yaml --batch-size 100
 ```
+Embedding the whole book (~213k tokens) costs well under one cent. Only `chroma_db/` is needed at runtime; the keyword (BM25) index is rebuilt from it on startup.
 
 ---
 
@@ -153,7 +161,7 @@ streamlit run src/app.py
 Open your browser at `http://localhost:8501` to:
 - Ask free-form questions or click starter questions in the sidebar.
 - Filter retrieval by specific chapters (*Asana*, *Shatkarma & Pranayama*, *Mudra & Bandha*, *Samadhi*).
-- Inspect collapsible source attributions and verified verse citations.
+- Inspect collapsible source excerpts and the citation check for each answer.
 
 ### Option B: Terminal CLI Chat
 Launch an interactive REPL in the terminal:
@@ -166,17 +174,31 @@ python src/chat.py --query "What are the rules and precautions for pranayama pra
 ```
 
 CLI commands available inside the chat session:
-- `:sources` — Inspect source chunks retrieved for the last query.
-- `:clear` — Reset conversation history.
-- `:filter <1-4>` — Filter context to a specific chapter (e.g., `:filter 2`).
-- `:clearfilter` — Remove chapter restrictions.
-- `:exit` or `:quit` — Exit the REPL.
+- `:sources` / `:sources full` — Show the excerpts retrieved for the last answer (truncated / full text), with the citation check.
+- `:ch <1-4>` — Filter retrieval to one chapter (e.g., `:ch 2`); `:all` removes the filter.
+- `:k <N>` — Change how many excerpts are retrieved (default 4).
+- `:model <name>` — Switch the OpenAI chat model.
+- `:history` — Show past turns; `:clear` resets the conversation.
+- `:help` — List commands; `exit` or `quit` leaves the chat.
+
+In `--query` mode the CLI exits with status 1 and a one-line message on errors (bad key, no index, network failure). Set `YOGIC_DEBUG=1` to print full tracebacks.
+
+### Citation checks
+Each citation in an answer is compared with the metadata of the excerpts retrieved for that answer:
+
+| Mark | Meaning |
+|---|---|
+| ✓ | Exactly matches a retrieved excerpt's citation |
+| ≈ | Falls within a retrieved excerpt, but its verse/page numbers are narrower than the excerpt's, so the exact verse/pages are not confirmed |
+| ⚠ | Matches no retrieved excerpt; treat with caution |
+
+The check confirms a citation points at retrieved text; it does not judge whether the answer's wording is faithful to that text.
 
 ---
 
 ## Running Tests
 
-The test suite includes 70+ automated tests covering text extraction, BPE token counting, dual-ceiling chunking, vector indexing, hybrid retrieval, and conversational state:
+The test suite covers text extraction, BPE token counting, dual-ceiling chunking, vector indexing, hybrid retrieval, citation checks, path resolution, error handling, and conversational state:
 
 ```bash
 python -m unittest discover test

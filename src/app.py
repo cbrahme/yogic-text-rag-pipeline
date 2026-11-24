@@ -12,12 +12,12 @@ Provides:
 
 import os
 import traceback
-import openai
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
 
 from query_db import HybridRetriever, SearchResult
+from error_messages import friendly_error_message, EmptyResponseError, OPENAI_TIMEOUT_SECONDS
 from prompt_engine import (
     SYSTEM_PROMPT_TEMPLATE,
     build_rag_messages,
@@ -30,7 +30,6 @@ from prompt_engine import (
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TOP_K = 4
 DEFAULT_TEMPERATURE = 0.2
-OPENAI_TIMEOUT_SECONDS = 60  # fail fast instead of the SDK's 10-minute default
 
 # Load environment variables
 load_dotenv()
@@ -114,27 +113,6 @@ def get_openai_client():
         st.error("⚠️ `OPENAI_API_KEY` not found in environment or `.env` file. Please configure it to enable chat.")
         st.stop()
     return OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SECONDS)
-
-
-def friendly_error_message(exc: Exception) -> str:
-    """Maps OpenAI / unexpected exceptions to a short, actionable message for the user."""
-    if isinstance(exc, openai.AuthenticationError):
-        return "The OpenAI API key was rejected. Check `OPENAI_API_KEY` in your `.env` file or deployment secrets."
-    if isinstance(exc, openai.PermissionDeniedError):
-        return "This OpenAI API key does not have access to the required model."
-    if isinstance(exc, openai.RateLimitError):
-        if "insufficient_quota" in str(exc):
-            return "The OpenAI account has run out of credits. Add billing/credits and try again."
-        return "OpenAI is rate-limiting requests right now. Please wait a few seconds and try again."
-    if isinstance(exc, openai.APITimeoutError):
-        return "OpenAI took too long to respond. Please try again."
-    if isinstance(exc, openai.APIConnectionError):
-        return "Could not reach OpenAI. Check your internet connection and try again."
-    if isinstance(exc, openai.BadRequestError):
-        return "OpenAI rejected the request (it may be too long). Try a shorter question or clear the chat memory."
-    if isinstance(exc, openai.APIStatusError):
-        return f"OpenAI returned an error (HTTP {exc.status_code}). Please try again shortly."
-    return "Something went wrong while answering. Please try again."
 
 
 def abandon_turn(stage: str, exc: Exception) -> None:
@@ -337,7 +315,7 @@ if prompt:
             abandon_turn("answer generation", e)
 
         if not isinstance(full_response, str) or not full_response.strip():
-            abandon_turn("answer generation", RuntimeError("Empty response from model"))
+            abandon_turn("answer generation", EmptyResponseError("Empty response from model"))
 
         # 6. Extract citations and check them against the retrieved excerpts
         citations = verify_citations(extract_citations(full_response), retrieved_sources)

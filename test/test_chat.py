@@ -10,17 +10,25 @@ Verifies:
 5. Mocked chat completion streaming and citation extraction.
 """
 
+import io
 import os
 import sys
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import MagicMock, patch
+
+import httpx
+import openai
 
 # Ensure src is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from query_db import SearchResult
+import chat
 from chat import ChatSession
+from chroma_manager import IndexNotFoundError
+from error_messages import EmptyResponseError
 
 
 class TestChatSession(unittest.TestCase):
@@ -119,6 +127,76 @@ class TestChatSession(unittest.TestCase):
         self.assertEqual(self.session.last_citations[0]["chapter"], "1")
         self.assertEqual(self.session.last_citations[0]["verse"], "26")
         self.assertEqual(self.session.last_citations[0]["pages"], "64-65")
+
+    def _delta(self, text):
+        return MagicMock(choices=[MagicMock(delta=MagicMock(content=text))])
+
+    def test_failure_mid_stream_leaves_history_unchanged(self):
+        """A connection drop mid-answer raises and does not record a half turn."""
+        self.mock_retriever.search.return_value = []
+
+        def failing_stream():
+            yield self._delta("Moola Bandha is ")
+            raise openai.APIConnectionError(request=httpx.Request("POST", "http://x"))
+
+        self.session.client.chat.completions.create.return_value = failing_stream()
+        with self.assertRaises(openai.APIConnectionError):
+            list(self.session.stream_answer("How to perform Moola Bandha?"))
+        self.assertEqual(self.session.history, [])
+
+    def test_empty_response_raises(self):
+        self.mock_retriever.search.return_value = []
+        self.session.client.chat.completions.create.return_value = iter([self._delta("  ")])
+        with self.assertRaises(EmptyResponseError):
+            list(self.session.stream_answer("What is Mithahara?"))
+        self.assertEqual(self.session.history, [])
+
+
+class TestChatCLIErrors(unittest.TestCase):
+    """Verifies the CLI exits cleanly with friendly messages instead of tracebacks."""
+
+    def _run_main(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(sys, "argv", ["chat.py"] + argv), redirect_stdout(out), redirect_stderr(err):
+            with self.assertRaises(SystemExit) as ctx:
+                chat.main()
+        return ctx.exception.code, out.getvalue(), err.getvalue()
+
+    @patch("chat.ChatSession")
+    def test_single_query_openai_error_exits_with_message(self, mock_session_cls):
+        session = MagicMock()
+        session.stream_answer.side_effect = openai.AuthenticationError(
+            "bad key", response=httpx.Response(401, request=httpx.Request("POST", "http://x")), body=None)
+        mock_session_cls.return_value = session
+
+        code, _, err = self._run_main(["--query", "How to perform Moola Bandha?"])
+        self.assertEqual(code, 1)
+        self.assertIn("API key was rejected", err)
+        self.assertNotIn("Traceback", err)
+
+    @patch("chat.ChatSession", side_effect=IndexNotFoundError("No ChromaDB index found at '/x/chroma_db'."))
+    def test_startup_without_index_exits_with_message(self, _):
+        code, _, err = self._run_main(["--query", "anything"])
+        self.assertEqual(code, 1)
+        self.assertIn("Could not start the assistant", err)
+        self.assertIn("/x/chroma_db", err)
+
+    @patch("chat.ChatSession", side_effect=ValueError("OPENAI_API_KEY not found."))
+    def test_startup_without_api_key_exits_with_message(self, _):
+        code, _, err = self._run_main([])
+        self.assertEqual(code, 1)
+        self.assertIn("OPENAI_API_KEY not found", err)
+
+    @patch("builtins.input", side_effect=["How to perform Moola Bandha?", "exit"])
+    def test_repl_survives_error_and_continues(self, _):
+        session = MagicMock(model="gpt-4o-mini", top_k=4, chapter_filter=None, history=[])
+        session.stream_answer.side_effect = openai.APIConnectionError(request=httpx.Request("POST", "http://x"))
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            chat.run_chat_loop(session)  # must return normally on "exit"
+        self.assertIn("Could not reach OpenAI", err.getvalue())
+        self.assertIn("you can ask it again", out.getvalue())
+        self.assertIn("Om Shanti", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ Provides:
 
 import os
 import sys
+import traceback
 import re
 import argparse
 from typing import Dict, Any, List, Optional, Tuple, Iterator
@@ -24,6 +25,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from query_db import HybridRetriever, SearchResult, format_search_results
+from chroma_manager import IndexNotFoundError
+from error_messages import friendly_error_message, EmptyResponseError, OPENAI_TIMEOUT_SECONDS
 from prompt_engine import (
     SYSTEM_PROMPT_TEMPLATE,
     build_rag_messages,
@@ -62,7 +65,7 @@ class ChatSession:
             raise ValueError(
                 "OPENAI_API_KEY not found. Please set it in your environment or .env file."
             )
-        self.client = OpenAI(api_key=self.api_key)
+        self.client = OpenAI(api_key=self.api_key, timeout=OPENAI_TIMEOUT_SECONDS)
 
         # Initialize retriever
         self.retriever = HybridRetriever(config_or_path=self.config_path)
@@ -105,7 +108,9 @@ class ChatSession:
     ) -> Iterator[str]:
         """
         Retrieves context, constructs prompt payload, and yields streaming
-        tokens from the LLM. Updates session history upon completion.
+        tokens from the LLM. Updates session history only after a complete,
+        non-empty answer, so a failed turn leaves the conversation unchanged.
+        Raises OpenAI errors, IndexNotFoundError or EmptyResponseError.
         """
         k = top_k or self.top_k
         ch = chapter if chapter is not None else self.chapter_filter
@@ -140,6 +145,8 @@ class ChatSession:
 
         full_content: List[str] = []
         for chunk in stream:
+            if not chunk.choices:
+                continue
             delta = chunk.choices[0].delta.content or ""
             if delta:
                 full_content.append(delta)
@@ -147,6 +154,8 @@ class ChatSession:
 
         # 5. Record session history and extract citations
         assistant_reply = "".join(full_content)
+        if not assistant_reply.strip():
+            raise EmptyResponseError("Empty response from model")
         self.history.append({"role": "user", "content": query})
         self.history.append({"role": "assistant", "content": assistant_reply})
         self.last_citations = verify_citations(extract_citations(assistant_reply), self.last_sources)
@@ -170,6 +179,15 @@ class ChatSession:
         self.last_query = None
         self.last_sources = []
         self.last_citations = []
+
+
+def print_error(exc: Exception) -> None:
+    """Prints a friendly error message, plus technical details for unexpected errors."""
+    print(f"\n\n[!] {friendly_error_message(exc)}", file=sys.stderr)
+    if os.getenv("YOGIC_DEBUG"):
+        traceback.print_exception(exc, file=sys.stderr)
+    elif type(exc).__module__.split(".")[0] not in ("openai", "error_messages", "chroma_manager"):
+        print(f"    Details: {type(exc).__name__}: {exc} (set YOGIC_DEBUG=1 for a full traceback)", file=sys.stderr)
 
 
 def print_citations(citations: List[Dict[str, Any]]) -> None:
@@ -284,7 +302,9 @@ def run_chat_loop(session: ChatSession) -> None:
             print("\n\n[*] Session interrupted. Om Shanti! Namaste.\n")
             break
         except Exception as e:
-            print(f"\n[!] Error during execution: {e}\n")
+            # The failed question is not saved, so the user can simply ask again
+            print_error(e)
+            print("    Your question was not saved; you can ask it again.\n")
 
 
 # ============================================================================
@@ -302,12 +322,17 @@ def main():
     parser.add_argument("--sources", action="store_true", help="Print retrieved sources after answer")
     args = parser.parse_args()
 
-    session = ChatSession(
-        config_path=args.config,
-        model=args.model,
-        temperature=args.temperature,
-        top_k=args.top_k
-    )
+    try:
+        session = ChatSession(
+            config_path=args.config,
+            model=args.model,
+            temperature=args.temperature,
+            top_k=args.top_k
+        )
+    except (ValueError, FileNotFoundError, IndexNotFoundError) as e:
+        # Missing API key, missing config, or index not built yet
+        print(f"[!] Could not start the assistant: {e}", file=sys.stderr)
+        sys.exit(1)
     if args.chapter is not None:
         session.chapter_filter = args.chapter
 
@@ -315,9 +340,13 @@ def main():
         # Single-question non-interactive mode
         print(f"\n[Question]: {args.query}\n")
         print("-" * 60)
-        for token in session.stream_answer(args.query):
-            sys.stdout.write(token)
-            sys.stdout.flush()
+        try:
+            for token in session.stream_answer(args.query):
+                sys.stdout.write(token)
+                sys.stdout.flush()
+        except Exception as e:
+            print_error(e)
+            sys.exit(1)
         print("\n" + "-" * 60 + "\n")
 
         if args.sources and session.last_sources:
