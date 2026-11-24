@@ -32,6 +32,8 @@ import fitz  # PyMuPDF
 import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from project_paths import resolve_config_path, resolve_config_data_paths, resolve_data_path
+
 
 VERSE_LINE_REGEX = re.compile(
     r'^(?:Chapter\s*(?:\d+|[A-Za-z]+)\s+)?'
@@ -707,18 +709,20 @@ class StandardChunker:
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found at: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """Loads a YAML config (found via cwd or project root) with project-relative data paths resolved."""
+    resolved_path = resolve_config_path(config_path)
+    if not os.path.exists(resolved_path):
+        raise FileNotFoundError(f"Config file not found at: {config_path} (looked at {resolved_path})")
+    with open(resolved_path, "r", encoding="utf-8") as f:
+        return resolve_config_data_paths(yaml.safe_load(f) or {})
 
 
 def run_pipeline(config_path: str = "configs/hatha_yoga_pradipika.yaml") -> List[Chunk]:
     config = load_config(config_path)
     book_id = config.get("book_id", "hyp")
     book_title = config.get("book_title", "Yoga Scripture")
-    pdf_path = config.get("pdf_path", "docs/Hatha-Yoga-Pradipika-pages-2.pdf")
-    output_path = config.get("output_path", "chunks.jsonl")
+    pdf_path = resolve_data_path(config.get("pdf_path", "docs/Hatha-Yoga-Pradipika-pages-2.pdf"))
+    output_path = resolve_data_path(config.get("output_path", "chunks.jsonl"))
     strategy = config.get("chunking_strategy", "verse").lower()
 
     emb_conf = config.get("embedding", {})

@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from rank_bm25 import BM25Okapi, BM25Plus
 
-from chroma_manager import ChromaManager, load_yaml_config
+from chroma_manager import ChromaManager, IndexNotFoundError, load_yaml_config, BUILD_INDEX_HINT
 
 # Automatically load environment variables from .env
 load_dotenv()
@@ -111,8 +111,8 @@ class HybridRetriever:
             self.config = config_or_path
 
         self.rrf_k = rrf_k
-        self.manager = ChromaManager(self.config)
-        self.collection = self.manager.collection
+        # Read-only: never create an empty index while querying
+        self.manager = ChromaManager(self.config, create_if_missing=False)
 
         # Optional explicit chunks file; when None, the BM25 corpus is loaded from ChromaDB
         self.chunks_path = chunks_jsonl_path
@@ -132,6 +132,11 @@ class HybridRetriever:
         self.chunk_by_id: Dict[str, Dict[str, Any]] = {}
         self.bm25: Optional[BM25Okapi] = None
         self._build_bm25_index()
+
+    @property
+    def collection(self):
+        """Opens the ChromaDB collection on first use (raises IndexNotFoundError if not built)."""
+        return self.manager.collection
 
     @property
     def openai_client(self) -> OpenAI:
@@ -186,15 +191,10 @@ class HybridRetriever:
             source = self.chunks_path
         else:
             chunks = self._load_chunks_from_chroma()
-            persist_dir = self.config.get("vector_db", {}).get("persist_directory", "chroma_db")
-            source = f"ChromaDB collection '{self.collection.name}' at '{persist_dir}'"
+            source = f"ChromaDB collection '{self.collection.name}' at '{self.manager.persist_dir}'"
 
         if not chunks:
-            raise RuntimeError(
-                f"No indexed chunks found in {source}. Build the index first with "
-                f"`python src/embed_and_index.py --config <config.yaml>`, and run the app "
-                f"from the project root so relative paths resolve."
-            )
+            raise IndexNotFoundError(f"No indexed chunks found in {source}. {BUILD_INDEX_HINT}")
 
         self.chunks = chunks
         self.chunk_by_id = {c["chunk_id"]: c for c in chunks}

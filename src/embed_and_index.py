@@ -37,6 +37,7 @@ from tqdm import tqdm
 from openai import OpenAI, RateLimitError, APIConnectionError, APIError
 
 from chroma_manager import ChromaManager, load_yaml_config
+from project_paths import resolve_data_path
 
 # Automatically load environment variables from .env
 load_dotenv()
@@ -175,7 +176,8 @@ class BookIndexer:
         4. Upserts records into ChromaDB collection.
         5. Reports metrics and collection status.
         """
-        target_path = chunks_path or self.config.get("output_path", "chunks.jsonl")
+        # An explicit --chunks path is relative to the current directory; the config's is project-relative
+        target_path = chunks_path or resolve_data_path(self.config.get("output_path", "chunks.jsonl"))
         if not os.path.exists(target_path):
             raise FileNotFoundError(f"Chunks file not found at: {target_path}")
 

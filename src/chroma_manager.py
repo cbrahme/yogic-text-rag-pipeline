@@ -28,19 +28,44 @@ import chromadb
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 
+from project_paths import resolve_config_path, resolve_config_data_paths, resolve_data_path
+
+
+class IndexNotFoundError(RuntimeError):
+    """Raised when reading a ChromaDB index that has not been built."""
+
+
+BUILD_INDEX_HINT = "Build it with `python src/embed_and_index.py --config <config.yaml>`."
+
 
 def load_yaml_config(config_path: str) -> Dict[str, Any]:
-    """Loads declarative YAML configuration."""
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """
+    Loads declarative YAML configuration. The config file is found relative to
+    the current directory or the project root, and relative data paths inside it
+    are resolved against the project root, so callers work from any directory.
+    """
+    resolved_path = resolve_config_path(config_path)
+    if not os.path.exists(resolved_path):
+        raise FileNotFoundError(f"Configuration file not found: {config_path} (looked at {resolved_path})")
+    with open(resolved_path, "r", encoding="utf-8") as f:
+        return resolve_config_data_paths(yaml.safe_load(f) or {})
 
 
 class ChromaManager:
     """Manages persistent ChromaDB client, collections, and metadata contracts."""
 
-    def __init__(self, config_or_path: Union[str, Dict[str, Any], None] = None):
+    def __init__(
+        self,
+        config_or_path: Union[str, Dict[str, Any], None] = None,
+        create_if_missing: bool = True
+    ):
+        """
+        Args:
+            create_if_missing: When True (indexing), the persist directory and
+                collection are created if absent. When False (querying), a
+                missing index raises IndexNotFoundError instead of silently
+                creating an empty one.
+        """
         if isinstance(config_or_path, str):
             self.config = load_yaml_config(config_or_path)
         elif isinstance(config_or_path, dict):
@@ -49,7 +74,8 @@ class ChromaManager:
             self.config = {}
 
         v_conf = self.config.get("vector_db", {})
-        self.persist_dir = v_conf.get("persist_directory", "chroma_db")
+        self.persist_dir = resolve_data_path(v_conf.get("persist_directory", "chroma_db"))
+        self.create_if_missing = create_if_missing
         self.collection_name = v_conf.get("collection_name", "yoga_scriptures")
         self.distance_metric = v_conf.get("distance_metric", "cosine")
         self.mode = v_conf.get("mode", "embedded")
@@ -62,6 +88,10 @@ class ChromaManager:
         """Lazily initializes and returns the ChromaDB client."""
         if self._client is None:
             if self.mode == "embedded":
+                if not self.create_if_missing and not os.path.isdir(self.persist_dir):
+                    raise IndexNotFoundError(
+                        f"No ChromaDB index found at '{self.persist_dir}'. {BUILD_INDEX_HINT}"
+                    )
                 os.makedirs(self.persist_dir, exist_ok=True)
                 self._client = chromadb.PersistentClient(path=self.persist_dir)
             elif self.mode == "server":
@@ -83,11 +113,28 @@ class ChromaManager:
         )
         return self._collection
 
+    def get_existing_collection(self, name: Optional[str] = None) -> Collection:
+        """Opens an existing collection without creating it."""
+        col_name = name or self.collection_name
+        try:
+            self._collection = self.client.get_collection(name=col_name)
+        except IndexNotFoundError:
+            raise
+        except Exception as e:
+            raise IndexNotFoundError(
+                f"Collection '{col_name}' does not exist in the ChromaDB index at "
+                f"'{self.persist_dir}'. {BUILD_INDEX_HINT}"
+            ) from e
+        return self._collection
+
     @property
     def collection(self) -> Collection:
-        """Returns the active collection instance."""
+        """Returns the active collection instance (created only if create_if_missing)."""
         if self._collection is None:
-            self.get_or_create_collection()
+            if self.create_if_missing:
+                self.get_or_create_collection()
+            else:
+                self.get_existing_collection()
         return self._collection
 
     @staticmethod
