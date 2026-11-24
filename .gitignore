@@ -20,6 +20,8 @@ docs/
 plan.md
 chroma_db/
 chunks.jsonl
+# Evaluation outputs contain model answers quoting the book
+eval/results/
 *.sqlite3
 
 # OS files

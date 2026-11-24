@@ -80,6 +80,7 @@ flowchart TD
 │   ├── project_paths.py            # Project-root path resolution
 │   ├── prompt_engine.py            # Prompt templates, term alignment, citation checks
 │   └── query_db.py                 # Hybrid retriever (ChromaDB + BM25 via RRF)
+├── eval/                           # Evaluation set (questions.yaml) and runner (run_eval.py)
 ├── test/                           # Unit test suite
 ├── .github/workflows/tests.yml     # CI: runs the tests on Python 3.11 and 3.12
 ├── .env.example                    # Environment variable template
@@ -205,6 +206,29 @@ python -m unittest discover test
 ```
 
 Tests also run automatically on GitHub Actions (Python 3.11 and 3.12) for every push to `main` and every pull request. They need no API key, index or PDF: OpenAI calls are mocked and ChromaDB uses temporary directories.
+
+---
+
+## Evaluation
+
+`eval/questions.yaml` holds 34 questions (how-to, benefits, definitions, lists, everyday English wording, a follow-up, advanced practices and off-topic questions). Each one lists the verses a correct answer should come from and a few key facts it must contain. `eval/run_eval.py` runs them through the real pipeline and reports:
+
+| Metric | Meaning |
+|---|---|
+| Retrieval hit rate | An expected verse was among the retrieved excerpts |
+| Answers citing an expected verse | The answer cites at least one expected verse |
+| Key-fact recall | Share of key facts present in the answers (checked by an LLM judge, `gpt-4o` by default) |
+| Answers with unsupported claims | Answers containing a claim for which the judge could not quote supporting text from the retrieved excerpts (each quote is verified in code, so the judge cannot simply assert support) |
+| Citation ✓ / ≈ / ⚠ | Citation check results across all answers |
+| Guru warnings, declines | Advanced practices mention a guru; off-topic questions are declined |
+
+```bash
+python eval/run_eval.py                                  # full run (about $0.30, mostly the gpt-4o judge)
+python eval/run_eval.py --only mitahara-what --no-judge  # quick check without the judge (fractions of a cent)
+python eval/run_eval.py --compare eval/results/<earlier>.json   # show changes vs an earlier run
+```
+
+It needs your API key and a built index, so it is run manually (not in CI). Results are saved to `eval/results/`, which is git-ignored because it contains the model's answers. LLM output and judging vary a little between runs, so treat small differences as noise.
 
 ---
 
