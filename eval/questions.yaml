@@ -1,0 +1,319 @@
+# Evaluation set for YogicScholar (Hatha Yoga Pradipika, Bihar School of Yoga edition)
+#
+# Each case:
+#   id               unique slug
+#   type             procedural | benefits | definitional | list | colloquial | followup | advanced | offtopic
+#   question         what the user asks
+#   history          (optional) earlier user questions asked first in the same conversation
+#   expected_verses  verse ranges ("chapter:start-end") a correct answer should be grounded in;
+#                    retrieval counts as a hit if any retrieved excerpt overlaps any of them
+#   key_facts        short paraphrased facts a correct answer must contain (checked by an LLM judge)
+#   expect           answer (default) | decline  (decline = the text does not cover this)
+#   guru_warning     (optional) true if the answer must say to practice under a guru's guidance
+#
+# Key facts are paraphrased from the verse translations, not quoted, so this file
+# contains no copyrighted text. Please review them: they define what "correct" means.
+
+- id: moola-bandha-how
+  type: procedural
+  question: How to perform Moola Bandha?
+  expected_verses: ["3:61-63"]
+  key_facts:
+    - The heel presses the perineum (or vagina)
+    - The perineum is contracted so the downward-moving apana vayu goes upward
+    - The anus itself should not be contracted (that is a different practice)
+
+- id: moola-bandha-benefits-followup
+  type: followup
+  history: ["How to perform Moola Bandha?"]
+  question: What are its benefits?
+  expected_verses: ["3:61-63", "3:64", "3:65"]
+  key_facts:
+    - Prana and apana unite
+    - Urine and stool decrease
+    - Even an old person becomes young (rejuvenation)
+
+- id: six-causes-failure
+  type: list
+  question: What are the six causes of failure in yoga?
+  expected_verses: ["1:15"]
+  key_facts:
+    - Overeating and over-exertion
+    - Talkativeness and (rigidly) adhering to rules
+    - The company of common people and unsteadiness of mind
+
+- id: six-causes-success
+  type: list
+  question: What brings success in yoga according to the text?
+  expected_verses: ["1:16"]
+  key_facts:
+    - Enthusiasm and perseverance
+    - Discrimination and unshakeable faith
+    - Courage and avoiding the company of common people
+
+- id: mitahara-what
+  type: definitional
+  question: What is Mitahara?
+  expected_verses: ["1:57", "1:58"]
+  key_facts:
+    - Moderate diet of agreeable, pleasant (sweet) food
+    - One quarter of the stomach is left empty
+    - Food is eaten as an offering to please Shiva, not for oneself
+
+- id: bhastrika-how
+  type: procedural
+  question: How is Bhastrika Pranayama practiced?
+  expected_verses: ["2:59-65"]
+  key_facts:
+    - Sit in padmasana with neck and abdomen aligned
+    - Breathe in and out rapidly and forcefully like a pair of bellows
+    - When tired, inhale through the right nostril and hold the breath (kumbhaka)
+
+- id: ujjayi-how
+  type: procedural
+  question: How do you practice Ujjayi pranayama?
+  expected_verses: ["2:51-53"]
+  key_facts:
+    - Mouth closed, inhale so the breath is felt from throat to heart with a sonorous sound
+    - Hold the breath (kumbhaka) and exhale through the left nostril (ida)
+    - It can be done while standing, sitting or walking
+
+- id: ujjayi-benefits
+  type: benefits
+  question: What are the benefits of Ujjayi?
+  expected_verses: ["2:51-53"]
+  key_facts:
+    - Removes phlegm from the throat
+    - Stimulates the digestive fire
+    - Removes dropsy and disorders of the nadis and dhatus
+
+- id: matsyendrasana-how
+  type: procedural
+  question: How do I do Matsyendrasana?
+  expected_verses: ["1:26"]
+  key_facts:
+    - One foot at the base of the opposite thigh, the other foot beside the knee
+    - Hold the foot with the opposite hand and pass the other arm behind the waist
+    - Remain with the body turned (a spinal twist)
+
+- id: matsyendrasana-benefits
+  type: benefits
+  question: What are the benefits of Matsyendrasana?
+  expected_verses: ["1:27"]
+  key_facts:
+    - Greatly increases the digestive fire
+    - Removes diseases
+    - Awakens kundalini (the serpent power)
+
+- id: paschimottanasana-benefits
+  type: benefits
+  question: Why is Paschimottanasana considered important?
+  expected_verses: ["1:28", "1:29"]
+  key_facts:
+    - Called the best among asanas
+    - Prana rises through sushumna and the digestive fire increases
+    - The abdomen becomes flat and the practitioner becomes free of disease
+
+- id: siddhasana-how
+  type: procedural
+  question: Describe Siddhasana.
+  expected_verses: ["1:35"]
+  key_facts:
+    - One heel presses the perineum and the other foot is placed above the genitals
+    - Chin rests toward the chest and the gaze is fixed at the eyebrow centre
+    - Said to open the door to liberation
+
+- id: padmasana-how
+  type: procedural
+  question: How is Padmasana performed?
+  expected_verses: ["1:44-47", "1:48", "1:49"]
+  key_facts:
+    - Each foot is placed on the opposite thigh
+    - Chin against the chest and gaze at the tip of the nose
+    - Described as the destroyer of diseases
+
+- id: nadi-shodhana-how
+  type: procedural
+  question: How is Nadi Shodhana pranayama done?
+  expected_verses: ["2:7-9"]
+  key_facts:
+    - Inhale through the left nostril, hold, exhale through the right
+    - Then inhale through the right, hold, exhale through the left
+    - Inhale through the nostril just used for exhaling; exhale slowly, not forcibly
+
+- id: shatkarma-list
+  type: list
+  question: What are the six cleansing practices (shatkarma)?
+  expected_verses: ["2:22"]
+  key_facts:
+    - Dhauti and basti
+    - Neti and trataka
+    - Nauli and kapalbhati
+
+- id: neti-how
+  type: procedural
+  question: What is neti and what does it do?
+  expected_verses: ["2:29", "2:30"]
+  key_facts:
+    - A soft thread is passed through the nose and out of the mouth (sutra neti)
+    - Cleanses the cranium (and is said to bestow clairvoyance)
+    - Destroys diseases above the throat
+
+- id: trataka-how
+  type: procedural
+  question: How is Trataka practiced and what are its benefits?
+  expected_verses: ["2:31", "2:32"]
+  key_facts:
+    - Gaze steadily without blinking at a small point until tears come
+    - Removes eye diseases
+    - Removes fatigue and sloth
+
+- id: nauli-how
+  type: procedural
+  question: How is Nauli done?
+  expected_verses: ["2:33", "2:34"]
+  key_facts:
+    - Lean forward and protrude the abdomen
+    - Rotate the abdominal muscles quickly from right to left
+    - Kindles the digestive fire
+
+- id: kapalbhati-how
+  type: procedural
+  question: What is Kapalbhati?
+  expected_verses: ["2:35"]
+  key_facts:
+    - Rapid exhalation and inhalation like a blacksmith's bellows
+    - Destroys mucus disorders
+    - One of the six cleansing practices (shatkarma)
+
+- id: sheetali-how
+  type: procedural
+  question: How is Sheetali pranayama practiced?
+  expected_verses: ["2:57-58"]
+  key_facts:
+    - Inhale through the (curled) tongue
+    - Hold the breath, then exhale through the nostrils
+    - Cools the body; said to counter fever, excess bile, hunger, thirst and poisons
+
+- id: seetkari-how
+  type: procedural
+  question: How do you do Seetkari pranayama?
+  expected_verses: ["2:54", "2:55"]
+  key_facts:
+    - Inhale through the mouth making a hissing sound
+    - Exhale through the nose
+    - Said to remove hunger, thirst, sleep and laziness
+
+- id: bhramari-how
+  type: procedural
+  question: How is Bhramari performed?
+  expected_verses: ["2:68"]
+  key_facts:
+    - Inhale quickly with a buzzing sound like a male black bee
+    - Exhale slowly with the softer sound of a female bee
+    - The mind becomes absorbed in bliss
+
+- id: jalandhara-how
+  type: procedural
+  question: What is Jalandhara Bandha?
+  expected_verses: ["3:70-71", "3:72"]
+  key_facts:
+    - Contract the throat by bringing the chin to the chest
+    - Catches (holds back) the flow of nectar in the throat
+    - Destroys throat ailments (and old age and death, per the text)
+
+- id: uddiyana-how
+  type: procedural
+  question: How is Uddiyana Bandha done?
+  expected_verses: ["3:55-56", "3:57"]
+  key_facts:
+    - Pull the abdomen back and in so the navel rises
+    - Done on an empty stomach, after exhaling
+    - Called the lion that conquers the elephant, death
+
+- id: maha-mudra-how
+  type: procedural
+  question: Explain how Maha Mudra is practiced.
+  expected_verses: ["3:10-13", "3:15"]  # technique verses (3:19-22 is Maha Bandha, a different practice)
+  key_facts:
+    - Press the left heel into the perineum and stretch the right leg out
+    - Hold the outstretched foot with the hands
+    - Lock the throat, retain the breath, then exhale slowly
+
+- id: kundalini-what
+  type: definitional
+  question: What role does kundalini play in hatha yoga?
+  expected_verses: ["3:1", "3:104", "3:105", "3:106-107", "3:108"]
+  key_facts:
+    - Kundalini is the support of all yoga practices
+    - Kundalini is the key that opens the door to liberation
+    - Kundalini is coiled like a serpent and must be awakened (made to flow)
+
+- id: samadhi-synonyms
+  type: list
+  question: What other names does the text give for samadhi?
+  expected_verses: ["4:3-4"]
+  key_facts:
+    - Raja yoga, unmani and manonmani
+    - Laya, amaratwa and sahaja
+    - Jivanmukti and turiya
+
+# --- English / colloquial wording (tests terminology alignment) ---
+
+- id: root-lock-colloquial
+  type: colloquial
+  question: How do I do the root lock?
+  expected_verses: ["3:61-63"]
+  key_facts:
+    - Identifies the practice as Moola Bandha
+    - Contract the perineum so apana moves upward
+
+- id: alternate-nostril-colloquial
+  type: colloquial
+  question: How do I do alternate nostril breathing?
+  expected_verses: ["2:7-9"]
+  key_facts:
+    - Identifies the practice as Nadi Shodhana
+    - Alternate inhaling, holding and exhaling between the left and right nostrils
+
+- id: spinal-twist-colloquial
+  type: colloquial
+  question: Tell me about the spinal twist pose.
+  expected_verses: ["1:26", "1:27"]
+  key_facts:
+    - Identifies the pose as Matsyendrasana
+    - Body is turned with one foot by the opposite thigh or knee
+
+# --- Advanced practices: the text says these need a guru ---
+
+- id: khechari-how
+  type: advanced
+  question: How do I practice Khechari Mudra?
+  expected_verses: ["3:32-36", "3:37"]
+  guru_warning: true
+  key_facts:
+    - The tongue is turned back into the cavity above the palate
+    - The membrane under the tongue is gradually cut over about six months
+    - Must be learned under the guidance of a guru
+
+- id: vipareeta-karani-how
+  type: advanced
+  question: What is Vipareeta Karani mudra and how long should it be practiced?
+  expected_verses: ["3:78-79", "3:80-81", "3:82"]
+  guru_warning: true
+  key_facts:
+    - Inverted position with the navel above and the palate below
+    - Learned through the guru's instructions, not from books
+    - Practiced daily, increasing the duration gradually
+
+# --- Not covered by the text: the app should say so ---
+
+- id: offtopic-geography
+  type: offtopic
+  question: What is the capital of France?
+  expect: decline
+
+- id: offtopic-modern-nutrition
+  type: offtopic
+  question: How many grams of protein should a yogi eat per day?
+  expect: decline
