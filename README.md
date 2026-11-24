@@ -3,7 +3,7 @@
 > An intelligent, hybrid Retrieval-Augmented Generation (RAG) system specialized in classical yogic scriptures, featuring verse-level chunking, Sanskrit terminology alignment, verified citation grounding, and an interactive Streamlit UI.
 
 [![Tests](https://github.com/cbrahme/yogic-text-rag-pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/cbrahme/yogic-text-rag-pipeline/actions/workflows/tests.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B.svg)](https://streamlit.io/)
 [![ChromaDB](https://img.shields.io/badge/VectorDB-ChromaDB-purple.svg)](https://www.trychroma.com/)
@@ -81,7 +81,7 @@ flowchart TD
 │   ├── prompt_engine.py            # Prompt templates, term alignment, citation checks
 │   └── query_db.py                 # Hybrid retriever (ChromaDB + BM25 via RRF)
 ├── test/                           # Unit test suite
-├── .github/workflows/tests.yml     # CI: runs the tests on Python 3.10–3.12
+├── .github/workflows/tests.yml     # CI: runs the tests on Python 3.11 and 3.12
 ├── .env.example                    # Environment variable template
 ├── .gitignore                      # Git exclusion rules
 ├── LICENSE                         # MIT License
@@ -94,7 +94,7 @@ flowchart TD
 ## Getting Started
 
 ### Prerequisites
-- **Python**: 3.10 or higher
+- **Python**: 3.11 or higher (current Streamlit and pandas no longer support 3.10)
 - **OpenAI API Key**: Required for embeddings (`text-embedding-3-small`) and generation (`gpt-4o-mini`).
 - **The scripture PDF**: Not included in this repository, because the translation and commentary are copyrighted. Obtain your own copy of the *Hatha Yoga Pradipika* (Bihar School of Yoga edition) and build the index yourself (see below). The generated `chunks.jsonl` and `chroma_db/` contain the book's text, so they are git-ignored and should not be committed.
 
@@ -204,7 +204,7 @@ The test suite covers text extraction, BPE token counting, dual-ceiling chunking
 python -m unittest discover test
 ```
 
-Tests also run automatically on GitHub Actions (Python 3.10, 3.11 and 3.12) for every push to `main` and every pull request. They need no API key, index or PDF: OpenAI calls are mocked and ChromaDB uses temporary directories.
+Tests also run automatically on GitHub Actions (Python 3.11 and 3.12) for every push to `main` and every pull request. They need no API key, index or PDF: OpenAI calls are mocked and ChromaDB uses temporary directories.
 
 ---
 
